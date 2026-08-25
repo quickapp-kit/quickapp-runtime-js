@@ -12,7 +12,7 @@ struct NativeEntry {
   CoreMessageKind kind;
 };
 
-constexpr std::array<NativeEntry, 13> kMessageEntries{{
+constexpr std::array<NativeEntry, 16> kMessageEntries{{
     {"$quickapp_runtime_v1_instantiateTemplate$",
      CoreMessageKind::InstantiateTemplate},
     {"$quickapp_runtime_v1_completeVerifiedModuleLoad$",
@@ -27,7 +27,10 @@ constexpr std::array<NativeEntry, 13> kMessageEntries{{
     {"$quickapp_runtime_v1_pushRoute$", CoreMessageKind::NavigationPush},
     {"$quickapp_runtime_v1_closeRoute$", CoreMessageKind::NavigationClose},
     {"$quickapp_runtime_v1_showToast$", CoreMessageKind::ShowToast},
+    {"$quickapp_runtime_v1_featureRequest$", CoreMessageKind::FeatureRequest},
     {"$quickapp_runtime_v1_getDeviceInfo$", CoreMessageKind::DeviceGetInfo},
+    {"$quickapp_runtime_v1_startTimer$", CoreMessageKind::TimerStart},
+    {"$quickapp_runtime_v1_cancelTimer$", CoreMessageKind::TimerCancel},
     {"$quickapp_runtime_v1_setTitleBar$", CoreMessageKind::SetTitleBar},
     {"$quickapp_runtime_v1_setMeta$", CoreMessageKind::SetMeta},
     {"$quickapp_runtime_v1_completeLifecycle$",
@@ -629,9 +632,21 @@ void RuntimeAbiService::dispatchToConsumer(
         } else if constexpr (std::is_same_v<T, ShowToastResult>) {
           if (callbackSlots_.showToastResult)
             callbackSlots_.showToastResult(typed);
+        } else if constexpr (std::is_same_v<T, FeatureResult>) {
+          if (callbackSlots_.featureResult)
+            callbackSlots_.featureResult(typed);
         } else if constexpr (std::is_same_v<T, DeviceGetInfoResult>) {
           if (callbackSlots_.deviceGetInfoResult)
             callbackSlots_.deviceGetInfoResult(typed);
+        } else if constexpr (std::is_same_v<T, TimerStartResult>) {
+          if (callbackSlots_.timerStartResult)
+            callbackSlots_.timerStartResult(typed);
+        } else if constexpr (std::is_same_v<T, TimerCancelResult>) {
+          if (callbackSlots_.timerCancelResult)
+            callbackSlots_.timerCancelResult(typed);
+        } else if constexpr (std::is_same_v<T, TimerFired>) {
+          if (callbackSlots_.timerFired)
+            callbackSlots_.timerFired(typed);
         } else if constexpr (std::is_same_v<T, SetTitleBarResult>) {
           if (callbackSlots_.setTitleBarResult)
             callbackSlots_.setTitleBarResult(typed);

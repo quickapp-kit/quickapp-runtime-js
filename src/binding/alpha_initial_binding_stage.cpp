@@ -51,6 +51,7 @@ AlphaInitialBindingStage::evaluateOnExecutor(
   try {
     InitialBindingSnapshot snapshot;
     for (auto &entry : evaluators.value()) {
+      if (!entry.initial) continue;
       auto scope = engine_->fromRuntimeValue(
           *context_, RuntimeValue(RuntimeValue::Object{}));
       if (!scope.ok()) {

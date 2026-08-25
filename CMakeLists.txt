@@ -176,8 +176,10 @@ if(QUICKAPP_JS_BUILD_QUICKJS_PROVIDER)
   -Wno-missing-field-initializers
   -Wno-implicit-fallthrough
   )
-  if(UNIX)
+  if(UNIX AND NOT ANDROID)
     target_link_libraries(quickapp_quickjs_vendor PUBLIC m pthread)
+  elseif(ANDROID)
+    target_link_libraries(quickapp_quickjs_vendor PUBLIC m)
   endif()
   quickapp_js_apply_sanitizers(quickapp_quickjs_vendor)
 

@@ -66,7 +66,10 @@ enum class CoreMessageKind {
   NavigationPush,
   NavigationClose,
   ShowToast,
+  FeatureRequest,
   DeviceGetInfo,
+  TimerStart,
+  TimerCancel,
   SetTitleBar,
   SetMeta,
   CompleteLifecycle,
@@ -85,14 +88,18 @@ enum class JsCallbackKind {
   NavigationPushResult,
   NavigationCloseResult,
   ShowToastResult,
+  FeatureResult,
   DeviceGetInfoResult,
+  TimerStartResult,
+  TimerCancelResult,
+  TimerFired,
   SetTitleBarResult,
   SetMetaResult,
   SurfaceStatusChanged,
 };
 
 using DynamicValues = std::map<std::string, RuntimeValue, std::less<>>;
-using BindingValue = std::variant<std::string, bool>;
+using BindingValue = std::variant<std::string, bool, double>;
 using BindingValues = std::map<std::uint64_t, BindingValue>;
 using BlockKey = std::variant<std::string, double>;
 using ImmutableByteStorage =
@@ -230,9 +237,52 @@ struct ShowToast {
   std::string requestId, surfaceId, message;
   std::uint64_t durationMs{0};
 };
+enum class FeatureModule { Prompt, Fetch, File, OpenUrl, Webview };
+enum class FeatureMethod {
+  Alert,
+  Confirm,
+  Fetch,
+  FetchCancel,
+  FileRead,
+  FileWrite,
+  FileExists,
+  FileDelete,
+  OpenUrl,
+  WebviewOpen,
+};
+struct FeatureHeader {
+  std::string name;
+  std::string value;
+};
+struct FeatureRequest {
+  static constexpr auto kind = CoreMessageKind::FeatureRequest;
+  std::string requestId, surfaceId;
+  FeatureModule module{FeatureModule::Prompt};
+  FeatureMethod method{FeatureMethod::Alert};
+  std::string text;
+  std::string url;
+  std::string httpMethod;
+  std::vector<FeatureHeader> headers;
+  std::optional<std::string> body;
+  std::uint64_t timeoutMs{0};
+  std::string responseType;
+  std::string targetRequestId;
+  std::string path;
+  std::optional<std::string> data;
+};
 struct DeviceGetInfo {
   static constexpr auto kind = CoreMessageKind::DeviceGetInfo;
   std::string requestId, surfaceId;
+};
+struct TimerStart {
+  static constexpr auto kind = CoreMessageKind::TimerStart;
+  std::string requestId, surfaceId;
+  std::uint64_t delayMs{0};
+  std::uint64_t periodMs{0};
+};
+struct TimerCancel {
+  static constexpr auto kind = CoreMessageKind::TimerCancel;
+  std::string requestId, surfaceId, timerId;
 };
 struct SetTitleBar {
   static constexpr auto kind = CoreMessageKind::SetTitleBar;
@@ -255,7 +305,8 @@ using CoreInboundMessage =
     std::variant<InstantiateTemplate, CompleteVerifiedModuleLoad,
                  CompleteVmInitialization, SubmitRenderTransaction,
                  RegisterHandler, UnregisterHandler, NavigationPush,
-                 NavigationClose, ShowToast, DeviceGetInfo, SetTitleBar,
+                 NavigationClose, ShowToast, FeatureRequest, DeviceGetInfo, TimerStart,
+                 TimerCancel, SetTitleBar,
                  SetMeta, CompleteLifecycle>;
 
 struct LoadVerifiedModule {
@@ -333,11 +384,39 @@ struct ShowToastResult {
   std::string requestId, surfaceId, status;
   std::optional<MessageRuntimeError> error;
 };
+struct FeatureResult {
+  static constexpr auto kind = JsCallbackKind::FeatureResult;
+  std::string requestId, surfaceId, status;
+  std::optional<bool> confirmed;
+  std::optional<std::uint64_t> httpStatus;
+  std::optional<std::string> responseBody;
+  std::optional<bool> responseIsJson;
+  std::optional<std::string> fileData;
+  std::optional<bool> fileExists;
+  std::optional<MessageRuntimeError> error;
+};
 struct DeviceGetInfoResult {
   static constexpr auto kind = JsCallbackKind::DeviceGetInfoResult;
   std::string requestId, surfaceId, status;
   std::optional<DeviceInfo> info;
   std::optional<MessageRuntimeError> error;
+};
+struct TimerStartResult {
+  static constexpr auto kind = JsCallbackKind::TimerStartResult;
+  std::string requestId, surfaceId, status;
+  std::optional<std::string> timerId;
+  std::optional<MessageRuntimeError> error;
+};
+struct TimerCancelResult {
+  static constexpr auto kind = JsCallbackKind::TimerCancelResult;
+  std::string requestId, surfaceId, status, timerId;
+  std::optional<MessageRuntimeError> error;
+};
+struct TimerFired {
+  static constexpr auto kind = JsCallbackKind::TimerFired;
+  std::string surfaceId, timerId;
+  std::uint64_t sequence{0};
+  std::uint64_t missedPeriods{0};
 };
 struct SetTitleBarResult {
   static constexpr auto kind = JsCallbackKind::SetTitleBarResult;
@@ -360,7 +439,8 @@ using JsInboundMessage =
                  VmInitializationDispatch, LifecycleDispatch, JsEventDispatch,
                  InstantiateTemplateResult, HandlerRegistrationResult,
                  RenderTransactionResult, NavigationPushResult,
-                 NavigationCloseResult, ShowToastResult, DeviceGetInfoResult,
+                 NavigationCloseResult, ShowToastResult, FeatureResult, DeviceGetInfoResult,
+                 TimerStartResult, TimerCancelResult, TimerFired,
                  SetTitleBarResult, SetMetaResult, SurfaceStatusChanged>;
 
 enum class CorrelationKeyKind { Request, Transaction };
@@ -426,7 +506,11 @@ struct CallbackSlots {
   std::function<void(const NavigationPushResult &)> navigationPushResult;
   std::function<void(const NavigationCloseResult &)> navigationCloseResult;
   std::function<void(const ShowToastResult &)> showToastResult;
+  std::function<void(const FeatureResult &)> featureResult;
   std::function<void(const DeviceGetInfoResult &)> deviceGetInfoResult;
+  std::function<void(const TimerStartResult &)> timerStartResult;
+  std::function<void(const TimerCancelResult &)> timerCancelResult;
+  std::function<void(const TimerFired &)> timerFired;
   std::function<void(const SetTitleBarResult &)> setTitleBarResult;
   std::function<void(const SetMetaResult &)> setMetaResult;
   std::function<void(const SurfaceStatusChanged &)> surfaceStatusChanged;

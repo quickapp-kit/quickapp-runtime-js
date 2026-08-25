@@ -104,6 +104,7 @@ struct ModuleDefinitionHandle {
 struct BindingEvaluatorHandle {
   std::uint64_t templateBindingId{0};
   JsValueRef evaluator;
+  bool initial{true};
 };
 
 class ModuleLoader final {

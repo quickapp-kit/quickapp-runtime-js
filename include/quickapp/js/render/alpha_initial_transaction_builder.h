@@ -18,9 +18,13 @@ public:
   [[nodiscard]] bool startOnExecutor(JsEnginePort &engine,
                                      const JsContextRef &context) noexcept;
   [[nodiscard]] vm::PageInitializationStageResult
+  snapshotInitialBlocksOnExecutor(const JsValueRef &pageVm,
+                                  RuntimeValue::Array &blocks) noexcept;
+  [[nodiscard]] vm::PageInitializationStageResult
   submitOnExecutor(std::string_view surfaceId, std::string_view templateId,
                    const abi::BindingValues &initialBindings,
-                   const std::vector<abi::HandlerBinding> &initialHandlers) noexcept;
+                   const std::vector<abi::HandlerBinding> &initialHandlers,
+                   const RuntimeValue::Array &initialBlocks) noexcept;
   void stopOnExecutor() noexcept;
 
 private:

@@ -134,6 +134,8 @@ void run() {
     CHECK(facades->startOnExecutor(js, context));
     auto router = facades->resolveOnExecutor("@app-module/system.router");
     CHECK(router.ok());
+    auto device = facades->resolveOnExecutor("@app-module/system.device");
+    CHECK(device.ok());
     auto defaultExport = js.getProperty(context, router.value(), "default");
     CHECK(defaultExport.ok());
     auto push = js.getProperty(context, defaultExport.value(), "push");

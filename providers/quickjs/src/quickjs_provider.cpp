@@ -803,6 +803,20 @@ private:
         return EngineResult<RuntimeValue>::failure(exception(
             EngineExceptionKind::Runtime, "object contains accessor"));
       }
+      // JavaScript's `undefined` at the message root means an optional
+      // property was not supplied. RuntimeValue deliberately has no undefined
+      // variant, so omit it there; required-field and type validation remains
+      // the ABI codec's job. Nested undefined is an invalid data structure.
+      if (JS_IsUndefined(descriptor.value)) {
+        freeDescriptor(descriptor);
+        if (depth > 0) {
+          JS_FreePropertyEnum(state_->context, properties, propertyCount);
+          return EngineResult<RuntimeValue>::failure(exception(
+              EngineExceptionKind::Runtime,
+              "nested object contains undefined property"));
+        }
+        continue;
+      }
       auto child = jsToRuntimeValue(descriptor.value, limits, depth + 1, nodes,
                                     activeObjects);
       freeDescriptor(descriptor);

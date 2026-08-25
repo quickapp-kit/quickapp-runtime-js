@@ -2,10 +2,24 @@
 
 #include <array>
 #include <exception>
+#if defined(__ANDROID__)
+#include <android/log.h>
+#endif
 #include <utility>
 
 namespace quickapp::js::vm {
 namespace {
+
+void androidVmFailure(std::string_view phase, std::string_view message) noexcept {
+#if defined(__ANDROID__)
+  __android_log_print(ANDROID_LOG_INFO, "QuickAppKit", "android.vm.failure phase=%.*s error=%.*s",
+                      static_cast<int>(phase.size()), phase.data(),
+                      static_cast<int>(message.size()), message.data());
+#else
+  (void)phase;
+  (void)message;
+#endif
+}
 
 RuntimeValue::Object object(std::initializer_list<std::pair<const std::string, RuntimeValue>> values) {
   return RuntimeValue::Object(values);
@@ -178,6 +192,7 @@ void VmLifecycleService::failInitialization(
     const abi::VmInitializationDispatch &dispatch, std::string_view scope,
     std::string_view phase, std::string_view code,
     std::string_view message) noexcept {
+  androidVmFailure(phase, message);
   RuntimeValue::Object value{
       {"schemaVersion", RuntimeValue(1.0)},
       {"kind", RuntimeValue("vmInitializationResult")},
@@ -256,8 +271,26 @@ void VmLifecycleService::initializePage(
                        setup.error().message);
     return;
   }
+  const auto setSurfaceGlobal = [&](const RuntimeValue &value) {
+    auto global = engine_->globalObject(*context_);
+    auto jsValue = engine_->fromRuntimeValue(*context_, value);
+    return global.ok() && jsValue.ok() &&
+           engine_->setProperty(*context_, global.value(),
+                                "$quickapp_current_surface_id$",
+                                jsValue.value()).ok();
+  };
+  const auto clearSurfaceGlobal = [&]() {
+    static_cast<void>(setSurfaceGlobal(RuntimeValue(nullptr)));
+  };
+  if (!setSurfaceGlobal(RuntimeValue(*dispatch.surfaceId))) {
+    found->second.vm.reset();
+    failInitialization(dispatch, "page", "onInit", "JS_EXCEPTION",
+                       "Surface context could not be installed");
+    return;
+  }
   const auto contextValue = surfaceContextValue(found->second.context);
   if (!callOptionalHook(found->second.vm, "onInit", contextValue)) {
+    clearSurfaceGlobal();
     found->second.vm.reset();
     failInitialization(dispatch, "page", "onInit", "JS_EXCEPTION", "onInit failed");
     return;
@@ -266,17 +299,20 @@ void VmLifecycleService::initializePage(
       *dispatch.surfaceId, found->second.context.templateId,
       found->second.definition, found->second.vm);
   if (!staged.ok()) {
+    clearSurfaceGlobal();
     found->second.vm.reset();
     failInitialization(dispatch, "page", "initialEvaluation",
                        staged.error().code, staged.error().message);
     return;
   }
   if (!callOptionalHook(found->second.vm, "onReady", contextValue)) {
+    clearSurfaceGlobal();
     pageInitializationStage_.cancelOnExecutor(*dispatch.surfaceId);
     found->second.vm.reset();
     failInitialization(dispatch, "page", "onReady", "JS_EXCEPTION", "onReady failed");
     return;
   }
+  clearSurfaceGlobal();
   static_cast<void>(engine_->drainMicrotasks(*context_, 16));
   RuntimeValue::Object complete{
       {"schemaVersion", RuntimeValue(1.0)},
@@ -287,6 +323,7 @@ void VmLifecycleService::initializePage(
       {"surfaceId", RuntimeValue(*dispatch.surfaceId)}};
   const auto completionAccepted = postVmCompletion(RuntimeValue(complete));
   if (!completionAccepted) {
+    androidVmFailure("completeVmInitialization", "Runtime ABI completion rejected");
     pageInitializationStage_.cancelOnExecutor(*dispatch.surfaceId);
     found->second.vm.reset();
     return;
@@ -294,6 +331,7 @@ void VmLifecycleService::initializePage(
   auto submitted =
       pageInitializationStage_.submitInitialOnExecutor(*dispatch.surfaceId);
   if (!submitted.ok()) {
+    androidVmFailure(submitted.error().code, submitted.error().message);
     pageInitializationStage_.cancelOnExecutor(*dispatch.surfaceId);
     found->second.vm.reset();
   }

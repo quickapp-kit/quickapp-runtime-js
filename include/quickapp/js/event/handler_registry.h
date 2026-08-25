@@ -21,6 +21,7 @@ class HandlerRegistry final {
                                      const JsContextRef& context) noexcept;
   [[nodiscard]] bool bind(std::string surfaceId, std::string handlerId,
                           std::string methodName, JsValueRef pageVm) noexcept;
+  void unbind(std::string_view surfaceId, std::string_view handlerId) noexcept;
   [[nodiscard]] bool dispatchOnExecutor(const abi::JsEventDispatch& dispatch) noexcept;
   void closeSurface(std::string_view surfaceId) noexcept;
   void stopOnExecutor() noexcept;

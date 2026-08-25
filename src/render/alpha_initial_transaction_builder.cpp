@@ -37,10 +37,37 @@ bool AlphaInitialTransactionBuilder::startOnExecutor(
 }
 
 vm::PageInitializationStageResult
+AlphaInitialTransactionBuilder::snapshotInitialBlocksOnExecutor(
+    const JsValueRef &pageVm, RuntimeValue::Array &blocks) noexcept {
+  if (!onExecutor() || !running_ || !engine_ || !context_ || !pageVm.valid()) {
+    return vm::PageInitializationStageResult::failure(
+        stageError("ABI_INVALID_ARGUMENT", "Page VM is unavailable"));
+  }
+  auto value = engine_->getProperty(*context_, pageVm, "__qak_initial_blocks__");
+  if (!value.ok()) {
+    return vm::PageInitializationStageResult::failure(
+        stageError("JS_EXCEPTION", value.error().message));
+  }
+  auto converted = engine_->toRuntimeValue(*context_, value.value(), {16, 4096});
+  if (!converted.ok()) {
+    return vm::PageInitializationStageResult::failure(
+        stageError("JS_EXCEPTION", "Initial block snapshot conversion failed"));
+  }
+  const auto *array = std::get_if<RuntimeValue::Array>(&converted.value().storage());
+  if (array == nullptr) {
+    return vm::PageInitializationStageResult::failure(
+        stageError("ABI_INVALID_ARGUMENT", "Initial block snapshot is not an array"));
+  }
+  blocks = *array;
+  return vm::PageInitializationStageResult::success();
+}
+
+vm::PageInitializationStageResult
 AlphaInitialTransactionBuilder::submitOnExecutor(
     std::string_view surfaceId, std::string_view templateId,
     const abi::BindingValues &initialBindings,
-    const std::vector<abi::HandlerBinding> &initialHandlers) noexcept {
+    const std::vector<abi::HandlerBinding> &initialHandlers,
+    const RuntimeValue::Array &initialBlocks) noexcept {
   if (!onExecutor() || !running_ || !engine_ || !context_ ||
       surfaceId.empty() || templateId.empty()) {
     return vm::PageInitializationStageResult::failure(
@@ -52,9 +79,11 @@ AlphaInitialTransactionBuilder::submitOnExecutor(
     for (const auto &[id, value] : initialBindings) {
       if (const auto *text = std::get_if<std::string>(&value))
         values.emplace(std::to_string(id), RuntimeValue(*text));
-      else
+      else if (const auto *checked = std::get_if<bool>(&value))
         values.emplace(std::to_string(id),
-                       RuntimeValue(std::get<bool>(value)));
+                       RuntimeValue(*checked));
+      else
+        values.emplace(std::to_string(id), RuntimeValue(std::get<double>(value)));
     }
     RuntimeValue::Array handlers;
     handlers.reserve(initialHandlers.size());
@@ -73,7 +102,7 @@ AlphaInitialTransactionBuilder::submitOnExecutor(
         {"templateId", RuntimeValue(std::string(templateId))},
         {"ownerInstanceId", RuntimeValue("cmp:" + std::string(surfaceId))},
         {"initialBindings", RuntimeValue(std::move(values))},
-        {"initialBlocks", RuntimeValue(RuntimeValue::Array{})},
+        {"initialBlocks", RuntimeValue(initialBlocks)},
         {"initialHandlers", RuntimeValue(std::move(handlers))},
     }));
     auto global = engine_->globalObject(*context_);

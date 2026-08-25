@@ -75,8 +75,14 @@ std::string_view coreMessageKindName(CoreMessageKind kind) {
     return "navigationClose";
   case CoreMessageKind::ShowToast:
     return "showToast";
+  case CoreMessageKind::FeatureRequest:
+    return "featureRequest";
   case CoreMessageKind::DeviceGetInfo:
     return "deviceGetInfo";
+  case CoreMessageKind::TimerStart:
+    return "timerStart";
+  case CoreMessageKind::TimerCancel:
+    return "timerCancel";
   case CoreMessageKind::SetTitleBar:
     return "setTitleBar";
   case CoreMessageKind::SetMeta:
@@ -113,8 +119,16 @@ std::string_view callbackKindName(JsCallbackKind kind) {
     return "navigationCloseResult";
   case JsCallbackKind::ShowToastResult:
     return "showToastResult";
+  case JsCallbackKind::FeatureResult:
+    return "featureResult";
   case JsCallbackKind::DeviceGetInfoResult:
     return "deviceGetInfoResult";
+  case JsCallbackKind::TimerStartResult:
+    return "timerStartResult";
+  case JsCallbackKind::TimerCancelResult:
+    return "timerCancelResult";
+  case JsCallbackKind::TimerFired:
+    return "timerFired";
   case JsCallbackKind::SetTitleBarResult:
     return "setTitleBarResult";
   case JsCallbackKind::SetMetaResult:

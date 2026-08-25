@@ -1318,7 +1318,16 @@ ModuleLoader::bindingEvaluatorsOnExecutor(
       return Result<std::vector<BindingEvaluatorHandle>, ModuleError>::failure(
           mapEngineError(retained.error()));
     }
-    evaluators.push_back({id, std::move(retained).value()});
+    bool initial = true;
+    auto marker = engine_->getProperty(*context_, evaluator.value(), "__qak_initial__");
+    if (marker.ok()) {
+      auto markerValue = engine_->toRuntimeValue(*context_, marker.value(), {4, 8});
+      if (markerValue.ok()) {
+        if (const auto *flag = std::get_if<bool>(&markerValue.value().storage()))
+          initial = *flag;
+      }
+    }
+    evaluators.push_back({id, std::move(retained).value(), initial});
   }
   return Result<std::vector<BindingEvaluatorHandle>, ModuleError>::success(
       std::move(evaluators));

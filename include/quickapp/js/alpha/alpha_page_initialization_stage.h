@@ -32,6 +32,7 @@ private:
     std::string templateId;
     binding::InitialBindingSnapshot snapshot;
     std::vector<abi::HandlerBinding> handlers;
+    RuntimeValue::Array initialBlocks;
   };
 
   binding::AlphaInitialBindingStage &bindingStage_;

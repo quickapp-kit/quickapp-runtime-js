@@ -33,6 +33,15 @@ bool HandlerRegistry::bind(std::string surfaceId, std::string handlerId,
   }
 }
 
+void HandlerRegistry::unbind(std::string_view surfaceId,
+                             std::string_view handlerId) noexcept {
+  if (!running_ || !engineService_.executor().isOnExecutor() ||
+      surfaceId.empty() || handlerId.empty()) {
+    return;
+  }
+  handlers_.erase(std::string(surfaceId) + "\n" + std::string(handlerId));
+}
+
 bool HandlerRegistry::dispatchOnExecutor(
     const abi::JsEventDispatch& dispatch) noexcept {
   if (!running_ || !engineService_.executor().isOnExecutor() || !engine_ ||
@@ -60,10 +69,14 @@ bool HandlerRegistry::dispatchOnExecutor(
   if (!argument.ok()) return false;
   auto global = engine_->globalObject(*context_);
   auto surface = engine_->fromRuntimeValue(*context_, RuntimeValue(dispatch.surfaceId));
-  if (!global.ok() || !surface.ok() ||
+  auto request = engine_->fromRuntimeValue(*context_, RuntimeValue(dispatch.requestId));
+  if (!global.ok() || !surface.ok() || !request.ok() ||
       !engine_->setProperty(*context_, global.value(),
                             "$quickapp_current_surface_id$",
-                            surface.value()).ok()) {
+                            surface.value()).ok() ||
+      !engine_->setProperty(*context_, global.value(),
+                            "$quickapp_current_request_id$",
+                            request.value()).ok()) {
     return false;
   }
   std::array<JsValueRef, 1> args{std::move(argument).value()};
@@ -75,6 +88,9 @@ bool HandlerRegistry::dispatchOnExecutor(
     if (globalAgain.ok()) {
       static_cast<void>(engine_->setProperty(
           *context_, globalAgain.value(), "$quickapp_current_surface_id$",
+          nullValue.value()));
+      static_cast<void>(engine_->setProperty(
+          *context_, globalAgain.value(), "$quickapp_current_request_id$",
           nullValue.value()));
     }
   }

@@ -223,12 +223,43 @@ RuntimeValue outbound(CoreMessageKind kind, std::string id = {}) {
         {"message", RuntimeValue("hello")},
         {"durationMs", RuntimeValue(1000.0)},
     }));
+  case CoreMessageKind::FeatureRequest:
+    return RuntimeValue(object({
+        {"schemaVersion", RuntimeValue(1.0)},
+        {"kind", RuntimeValue("featureRequest")},
+        {"requestId", RuntimeValue(id.empty() ? "req:j-12" : id)},
+        {"surfaceId", RuntimeValue("srf:1")},
+        {"module", RuntimeValue("fetch")},
+        {"method", RuntimeValue("fetch")},
+        {"url", RuntimeValue("https://example.test/data")},
+        {"httpMethod", RuntimeValue("GET")},
+        {"headers", RuntimeValue(object({{"accept", RuntimeValue("application/json")}}))},
+        {"timeoutMs", RuntimeValue(1000.0)},
+        {"responseType", RuntimeValue("json")},
+    }));
   case CoreMessageKind::DeviceGetInfo:
     return RuntimeValue(object({
         {"schemaVersion", RuntimeValue(1.0)},
         {"kind", RuntimeValue("deviceGetInfo")},
         {"requestId", RuntimeValue(id.empty() ? "req:j-7" : id)},
         {"surfaceId", RuntimeValue("srf:1")},
+    }));
+  case CoreMessageKind::TimerStart:
+    return RuntimeValue(object({
+        {"schemaVersion", RuntimeValue(1.0)},
+        {"kind", RuntimeValue("timerStart")},
+        {"requestId", RuntimeValue(id.empty() ? "req:j-10" : id)},
+        {"surfaceId", RuntimeValue("srf:1")},
+        {"delayMs", RuntimeValue(10.0)},
+        {"periodMs", RuntimeValue(0.0)},
+    }));
+  case CoreMessageKind::TimerCancel:
+    return RuntimeValue(object({
+        {"schemaVersion", RuntimeValue(1.0)},
+        {"kind", RuntimeValue("timerCancel")},
+        {"requestId", RuntimeValue(id.empty() ? "req:j-11" : id)},
+        {"surfaceId", RuntimeValue("srf:1")},
+        {"timerId", RuntimeValue("tmr:1")},
     }));
   case CoreMessageKind::SetTitleBar:
     return RuntimeValue(object({
@@ -279,9 +310,19 @@ JsInboundMessage resultFor(JsCallbackKind kind, std::string id) {
                                  std::nullopt};
   case JsCallbackKind::ShowToastResult:
     return ShowToastResult{std::move(id), "srf:1", "completed", std::nullopt};
+  case JsCallbackKind::FeatureResult:
+    return FeatureResult{std::move(id), "srf:1", "completed", std::nullopt,
+                         200, std::string("{}"), true, std::nullopt,
+                         std::nullopt, std::nullopt};
   case JsCallbackKind::DeviceGetInfoResult:
     return DeviceGetInfoResult{std::move(id), "srf:1", "completed",
                                DeviceInfo{}, std::nullopt};
+  case JsCallbackKind::TimerStartResult:
+    return TimerStartResult{std::move(id), "srf:1", "completed", "tmr:1",
+                            std::nullopt};
+  case JsCallbackKind::TimerCancelResult:
+    return TimerCancelResult{std::move(id), "srf:1", "completed", "tmr:1",
+                             std::nullopt};
   case JsCallbackKind::SetTitleBarResult:
     return SetTitleBarResult{std::move(id), "srf:1", "completed", std::nullopt};
   case JsCallbackKind::SetMetaResult:
@@ -515,6 +556,8 @@ std::string bindingName(CoreMessageKind kind) {
       {CoreMessageKind::NavigationPush, "$quickapp_runtime_v1_pushRoute$"},
       {CoreMessageKind::NavigationClose, "$quickapp_runtime_v1_closeRoute$"},
       {CoreMessageKind::ShowToast, "$quickapp_runtime_v1_showToast$"},
+      {CoreMessageKind::FeatureRequest,
+       "$quickapp_runtime_v1_featureRequest$"},
       {CoreMessageKind::DeviceGetInfo, "$quickapp_runtime_v1_getDeviceInfo$"},
       {CoreMessageKind::SetTitleBar, "$quickapp_runtime_v1_setTitleBar$"},
       {CoreMessageKind::SetMeta, "$quickapp_runtime_v1_setMeta$"},
@@ -535,9 +578,9 @@ void verifyAllocatorFixture() {
 }
 
 void runAbiContractSuite(std::unique_ptr<JsEngineProvider> provider) {
-  Harness harness(std::move(provider));
+  Harness harness(std::move(provider), 11);
   harness.startAbi();
-  CHECK(harness.abi->resources().liveNativeEntries == 14);
+  CHECK(harness.abi->resources().liveNativeEntries == 17);
   harness.openSurface();
 
   std::map<JsCallbackKind, int> delivered;
@@ -595,6 +638,10 @@ void runAbiContractSuite(std::unique_ptr<JsEngineProvider> provider) {
     CHECK(message.status == "completed");
     ++delivered[JsCallbackKind::ShowToastResult];
   };
+  slots.featureResult = [&](const FeatureResult &message) {
+    CHECK(message.responseIsJson == true);
+    ++delivered[JsCallbackKind::FeatureResult];
+  };
   slots.deviceGetInfoResult = [&](const DeviceGetInfoResult &message) {
     CHECK(message.info.has_value());
     ++delivered[JsCallbackKind::DeviceGetInfoResult];
@@ -635,6 +682,7 @@ void runAbiContractSuite(std::unique_ptr<JsEngineProvider> provider) {
       CoreMessageKind::NavigationPush,
       CoreMessageKind::NavigationClose,
       CoreMessageKind::ShowToast,
+      CoreMessageKind::FeatureRequest,
       CoreMessageKind::DeviceGetInfo,
       CoreMessageKind::SetTitleBar,
       CoreMessageKind::SetMeta,
@@ -661,12 +709,14 @@ void runAbiContractSuite(std::unique_ptr<JsEngineProvider> provider) {
   CHECK(std::get<NavigationClose>(harness.core.messageAt(7)).sourceSurfaceId ==
         "srf:1");
   CHECK(std::get<ShowToast>(harness.core.messageAt(8)).durationMs == 1000);
-  CHECK(std::get<DeviceGetInfo>(harness.core.messageAt(9)).requestId ==
+  CHECK(std::get<FeatureRequest>(harness.core.messageAt(9)).url ==
+        "https://example.test/data");
+  CHECK(std::get<DeviceGetInfo>(harness.core.messageAt(10)).requestId ==
         "req:j-7");
-  CHECK(std::get<SetTitleBar>(harness.core.messageAt(10)).text == "title");
-  CHECK(std::get<SetMeta>(harness.core.messageAt(11)).title == "title");
-  CHECK(std::get<CompleteLifecycle>(harness.core.messageAt(12)).sequence == 1);
-  CHECK(harness.abi->resources().liveBridgeCorrelations == 10);
+  CHECK(std::get<SetTitleBar>(harness.core.messageAt(11)).text == "title");
+  CHECK(std::get<SetMeta>(harness.core.messageAt(12)).title == "title");
+  CHECK(std::get<CompleteLifecycle>(harness.core.messageAt(13)).sequence == 1);
+  CHECK(harness.abi->resources().liveBridgeCorrelations == 11);
 
   auto invalidVersion = outbound(CoreMessageKind::ShowToast, "req:j-20");
   auto &invalidObject = std::get<RuntimeValue::Object>(invalidVersion.storage());
@@ -694,7 +744,7 @@ void runAbiContractSuite(std::unique_ptr<JsEngineProvider> provider) {
   CHECK(!enqueueOk(harness.callBinding(
       bindingName(CoreMessageKind::ShowToast),
       {outbound(CoreMessageKind::ShowToast, "req:j-24")})));
-  CHECK(harness.abi->resources().liveBridgeCorrelations == 10);
+  CHECK(harness.abi->resources().liveBridgeCorrelations == 11);
   CHECK(!enqueueOk(harness.callBinding(
       bindingName(CoreMessageKind::ShowToast),
       {outbound(CoreMessageKind::ShowToast, "req:j-25")})));
@@ -704,12 +754,13 @@ void runAbiContractSuite(std::unique_ptr<JsEngineProvider> provider) {
             .ok);
   harness.barrier();
   CHECK(delivered[JsCallbackKind::ShowToastResult] == 0);
-  CHECK(harness.abi->resources().liveBridgeCorrelations == 10);
+  CHECK(harness.abi->resources().liveBridgeCorrelations == 11);
 
   std::vector<std::pair<JsCallbackKind, std::string>> results{
       {JsCallbackKind::SetMetaResult, "req:j-9"},
       {JsCallbackKind::SetTitleBarResult, "req:j-8"},
       {JsCallbackKind::DeviceGetInfoResult, "req:j-7"},
+      {JsCallbackKind::FeatureResult, "req:j-12"},
       {JsCallbackKind::ShowToastResult, "req:j-6"},
       {JsCallbackKind::NavigationCloseResult, "req:j-5"},
       {JsCallbackKind::NavigationPushResult, "req:j-4"},
@@ -732,6 +783,7 @@ void runAbiContractSuite(std::unique_ptr<JsEngineProvider> provider) {
   harness.barrier();
   CHECK(harness.abi->resources().liveBridgeCorrelations == 0);
   CHECK(delivered[JsCallbackKind::HandlerRegistrationResult] == 2);
+  CHECK(delivered[JsCallbackKind::FeatureResult] == 1);
   CHECK(delivered[JsCallbackKind::AppContext] == 1);
   CHECK(callbackOnExecutor);
   CHECK(appContextOrder == std::vector<std::string>{"pkg"});
@@ -793,6 +845,162 @@ void verifyQuickJsStrictValues() {
   Harness harness(std::make_unique<QuickJsEngineProvider>());
   harness.startAbi();
   harness.openSurface();
+
+  const auto undefinedObject = harness.evaluate("({x: undefined, y: true})");
+  const auto &undefinedFields =
+      std::get<RuntimeValue::Object>(undefinedObject.storage());
+  CHECK(!undefinedFields.contains("x"));
+  CHECK(std::get<bool>(undefinedFields.at("y").storage()));
+
+  const auto optionalUndefined = harness.evaluate(R"JS(
+    (() => {
+      const fetchRequest = {
+        schemaVersion: 1,
+        kind: 'featureRequest',
+        requestId: 'req:j-30',
+        surfaceId: 'srf:1',
+        module: 'fetch',
+        method: 'fetch',
+        url: 'local://platform/status',
+        httpMethod: undefined,
+        headers: undefined,
+        body: undefined,
+        timeoutMs: undefined,
+        responseType: undefined
+      };
+      const fileRequest = {
+        schemaVersion: 1,
+        kind: 'featureRequest',
+        requestId: 'req:j-31',
+        surfaceId: 'srf:1',
+        module: 'file',
+        method: 'read',
+        path: 'private/state.txt',
+        data: undefined
+      };
+      $quickapp_runtime_v1_featureRequest$(fetchRequest);
+      $quickapp_runtime_v1_featureRequest$(fileRequest);
+      return {sent: true};
+    })()
+  )JS");
+  const auto &optionalObject =
+      std::get<RuntimeValue::Object>(optionalUndefined.storage());
+  CHECK(std::get<bool>(optionalObject.at("sent").storage()));
+  CHECK(harness.core.messageCount() == 2);
+  const auto fetch = std::get<FeatureRequest>(harness.core.messageAt(0));
+  CHECK(fetch.module == FeatureModule::Fetch);
+  CHECK(fetch.url == "local://platform/status");
+  CHECK(fetch.httpMethod.empty());
+  CHECK(fetch.headers.empty());
+  CHECK(!fetch.body.has_value());
+  CHECK(fetch.timeoutMs == 0);
+  CHECK(fetch.responseType.empty());
+  const auto file = std::get<FeatureRequest>(harness.core.messageAt(1));
+  CHECK(file.module == FeatureModule::File);
+  CHECK(file.path == "private/state.txt");
+  CHECK(!file.data.has_value());
+
+  const auto validOptional = harness.evaluate(R"JS(
+    (() => {
+      $quickapp_runtime_v1_featureRequest$({
+        schemaVersion: 1,
+        kind: 'featureRequest',
+        requestId: 'req:j-32',
+        surfaceId: 'srf:1',
+        module: 'fetch',
+        method: 'fetch',
+        url: 'local://platform/status',
+        httpMethod: 'GET',
+        headers: {accept: 'application/json'},
+        body: '{}',
+        timeoutMs: 1000,
+        responseType: 'json'
+      });
+      return {sent: true};
+    })()
+  )JS");
+  CHECK(std::get<bool>(std::get<RuntimeValue::Object>(validOptional.storage())
+                           .at("sent")
+                           .storage()));
+  CHECK(harness.core.messageCount() == 3);
+
+  const auto urlFeatures = harness.evaluate(R"JS(
+    (() => {
+      $quickapp_runtime_v1_featureRequest$({
+        schemaVersion: 1,
+        kind: 'featureRequest',
+        requestId: 'req:j-34',
+        surfaceId: 'srf:1',
+        module: 'openUrl',
+        method: 'open',
+        url: 'https://example.test/external'
+      });
+      $quickapp_runtime_v1_featureRequest$({
+        schemaVersion: 1,
+        kind: 'featureRequest',
+        requestId: 'req:j-35',
+        surfaceId: 'srf:1',
+        module: 'webview',
+        method: 'open',
+        url: 'https://example.test/webview'
+      });
+      return {sent: true};
+    })()
+  )JS");
+  CHECK(std::get<bool>(std::get<RuntimeValue::Object>(urlFeatures.storage())
+                           .at("sent")
+                           .storage()));
+  CHECK(harness.core.messageCount() == 5);
+  const auto openUrl = std::get<FeatureRequest>(harness.core.messageAt(3));
+  CHECK(openUrl.module == FeatureModule::OpenUrl);
+  CHECK(openUrl.method == FeatureMethod::OpenUrl);
+  CHECK(openUrl.url == "https://example.test/external");
+  const auto webview = std::get<FeatureRequest>(harness.core.messageAt(4));
+  CHECK(webview.module == FeatureModule::Webview);
+  CHECK(webview.method == FeatureMethod::WebviewOpen);
+  CHECK(webview.url == "https://example.test/webview");
+
+  const auto invalidOptional = harness.evaluate(R"JS(
+    (() => {
+      $quickapp_runtime_v1_featureRequest$({
+        schemaVersion: 1,
+        kind: 'featureRequest',
+        requestId: 'req:j-33',
+        surfaceId: 'srf:1',
+        module: 'fetch',
+        method: 'fetch',
+        url: 'local://platform/status',
+        headers: {accept: undefined},
+        body: null,
+        timeoutMs: '1000'
+      });
+      return {sent: true};
+    })()
+  )JS");
+  CHECK(std::get<bool>(std::get<RuntimeValue::Object>(invalidOptional.storage())
+                           .at("sent")
+                           .storage()));
+  CHECK(harness.core.messageCount() == 5);
+
+  const auto missingRequired = harness.evaluate(R"JS(
+    (() => {
+      $quickapp_runtime_v1_featureRequest$({
+        schemaVersion: 1,
+        kind: 'featureRequest',
+        requestId: undefined,
+        surfaceId: 'srf:1',
+        module: 'fetch',
+        method: 'fetch',
+        url: 'local://platform/status'
+      });
+      return {sent: true};
+    })()
+  )JS");
+  CHECK(std::get<bool>(std::get<RuntimeValue::Object>(missingRequired.storage())
+                           .at("sent")
+                           .storage()));
+  CHECK(harness.core.messageCount() == 5);
+
   const auto getter = harness.evaluate(R"JS(
     (() => {
       globalThis.__getterHit = false;
@@ -851,7 +1059,7 @@ void verifyQuickJsStrictValues() {
     })()
   )JS");
   CHECK(!enqueueOk(forbidden));
-  CHECK(harness.core.messageCount() == 0);
+  CHECK(harness.core.messageCount() == 5);
   harness.stop();
 }
 
@@ -1305,6 +1513,20 @@ void verifyCodecCrossFields() {
                                          false, std::nullopt, std::nullopt,
                                          std::nullopt, std::nullopt};
   CHECK(!validateJsInboundMessage(unknownError, ValueLimits{32, 2048}).ok());
+
+  auto unsupported = resultFor(JsCallbackKind::ShowToastResult, "req:j-6");
+  auto& unsupportedResult = std::get<ShowToastResult>(unsupported);
+  unsupportedResult.status = "unsupported";
+  unsupportedResult.error = MessageRuntimeError{
+      "CAPABILITY_UNSUPPORTED", "toast is unavailable", false,
+      std::nullopt, std::nullopt, std::nullopt, std::nullopt};
+  CHECK(validateJsInboundMessage(unsupported, ValueLimits{32, 2048}).ok());
+
+  auto missingUnsupportedError = resultFor(
+      JsCallbackKind::ShowToastResult, "req:j-7");
+  std::get<ShowToastResult>(missingUnsupportedError).status = "unsupported";
+  CHECK(!validateJsInboundMessage(missingUnsupportedError,
+                                  ValueLimits{32, 2048}).ok());
 }
 
 void verifyTypedMessageExtraction() {
@@ -1374,6 +1596,25 @@ void verifyTypedMessageExtraction() {
   CHECK(std::get<std::string>(query.storage()) == "typed");
 }
 
+void verifyScrollEventCodec() {
+  for (const std::string event_type : {"scroll", "scrollend", "scrolltop",
+                                       "scrollbottom"}) {
+    JsInboundMessage message = JsEventDispatch{
+        "req:p-1", "srf:scroll", "hdl:scroll", event_type, "target",
+        LogicalNodeRef{"cmp:scroll", 1}, LogicalNodeRef{"cmp:scroll", 1},
+        1.0, {}};
+    CHECK(validateJsInboundMessage(message, ValueLimits{32, 2048}).ok());
+  }
+}
+
+void verifyTabsEventCodec() {
+  const JsEventDispatch message{
+      "req:p-2", "srf:tabs", "hdl:tabs", "change", "target",
+      LogicalNodeRef{"cmp:tabs", 1}, LogicalNodeRef{"cmp:tabs", 1}, 2.0,
+      { {"index", RuntimeValue(1.0)}, {"value", RuntimeValue("发现")} }};
+  CHECK(validateJsInboundMessage(message, ValueLimits{32, 2048}).ok());
+}
+
 void run(std::string_view name, const std::function<void()> &test) {
   test();
   std::cout << "PASS " << name << '\n';
@@ -1386,6 +1627,8 @@ int main() {
     run("JS-S02-A24 allocator fixture", verifyAllocatorFixture);
     run("JS-S02 codec cross fields", verifyCodecCrossFields);
     run("JS-S02 typed message extraction", verifyTypedMessageExtraction);
+    run("JS-S02 scroll event codec", verifyScrollEventCodec);
+    run("JS-S02 tabs event codec", verifyTabsEventCodec);
     run("JS-S02 identity failure", verifyIdentityFailure);
     run("JS-S02 partial binding rollback", verifyPartialBindingRollback);
     run("JS-S02 callback queue overflow", verifyCallbackQueueOverflow);

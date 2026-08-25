@@ -26,14 +26,19 @@ AlphaPageInitializationStage::evaluateInitialOnExecutor(
       definition, "cmp:" + std::string(surfaceId));
   if (!handlers.ok()) {
     return vm::PageInitializationStageResult::failure(
-        {std::string(module::moduleErrorCodeName(handlers.error().code)),
+      {std::string(module::moduleErrorCodeName(handlers.error().code)),
          handlers.error().message});
   }
   try {
+    RuntimeValue::Array initialBlocks;
+    auto blocks = transactionBuilder_.snapshotInitialBlocksOnExecutor(pageVm,
+                                                                       initialBlocks);
+    if (!blocks.ok()) return blocks;
     pending_.emplace(std::string(surfaceId),
                      PendingInitial{std::string(templateId),
                                     std::move(snapshot).value(),
-                                    std::move(handlers).value()});
+                                    std::move(handlers).value(),
+                                    std::move(initialBlocks)});
     return vm::PageInitializationStageResult::success();
   } catch (...) {
     return vm::PageInitializationStageResult::failure(
@@ -51,7 +56,7 @@ AlphaPageInitializationStage::submitInitialOnExecutor(
   }
   auto result = transactionBuilder_.submitOnExecutor(
       found->first, found->second.templateId, found->second.snapshot.values,
-      found->second.handlers);
+      found->second.handlers, found->second.initialBlocks);
   if (result.ok()) pending_.erase(found);
   return result;
 }

@@ -152,7 +152,9 @@ bool validErrorObject(const RuntimeValue::Object &object) {
       "RUNTIME_PROFILE_INCOMPATIBLE", "CAPABILITY_NOT_DECLARED",
       "CAPABILITY_DENIED", "CAPABILITY_UNSUPPORTED", "CAPABILITY_FAILED",
       "HOST_FEATURE_UNSUPPORTED", "MEASURE_FAILED", "OUT_OF_MEMORY",
-      "QUEUE_OVERFLOW", "JS_EXCEPTION", "PLATFORM_REJECTED"};
+      "QUEUE_OVERFLOW", "TIMER_UNSUPPORTED", "TIMER_LIMIT_EXCEEDED",
+      "TIMER_LIFECYCLE_CLOSED", "TIMER_STALE_OR_CANCELLED", "JS_EXCEPTION",
+      "PLATFORM_REJECTED"};
   if (!codes.contains(*stringField(object, "code"))) {
     return false;
   }
@@ -196,11 +198,19 @@ bool validBindingMap(const RuntimeValue::Object &bindings) {
   for (const auto &[key, value] : bindings) {
     if (!positiveDecimal(key) ||
         (!std::holds_alternative<std::string>(value.storage()) &&
-         !std::holds_alternative<bool>(value.storage()))) {
+         !std::holds_alternative<bool>(value.storage()) &&
+         !std::holds_alternative<double>(value.storage()))) {
       return false;
     }
   }
   return true;
+}
+
+bool validStringMap(const RuntimeValue::Object *values) {
+  if (values == nullptr) return false;
+  return std::ranges::all_of(*values, [](const auto &entry) {
+    return std::holds_alternative<std::string>(entry.second.storage());
+  });
 }
 
 bool validLogicalNode(const RuntimeValue::Object &object) {
@@ -393,11 +403,53 @@ bool validateCoreObject(CoreMessageKind kind,
            stringField(object, "message") &&
            !stringField(object, "message")->empty() &&
            isInteger(field(object, "durationMs"), 0);
+  case CoreMessageKind::FeatureRequest:
+    return exactFields(object,
+                       {"schemaVersion", "kind", "requestId", "surfaceId",
+                        "module", "method"},
+                       {"text", "url", "httpMethod", "headers", "body", "timeoutMs",
+                        "responseType", "targetRequestId", "path", "data"}) &&
+           validSchemaAndKind(object, "featureRequest") && jsRequest() &&
+           validSurface(object, "surfaceId") &&
+           stringIn(object, "module", {"prompt", "fetch", "file", "openUrl", "webview"}) &&
+           stringField(object, "method") &&
+           (stringIn(object, "module", {"prompt"})
+                ? stringIn(object, "method", {"alert", "confirm"})
+                : stringIn(object, "module", {"fetch"})
+                      ? stringIn(object, "method", {"fetch", "cancel"})
+                      : stringIn(object, "module", {"file"})
+                            ? stringIn(object, "method", {"read", "write", "exists", "delete"})
+                            : stringIn(object, "module", {"openUrl"})
+                                  ? stringIn(object, "method", {"open"})
+                                  : stringIn(object, "method", {"open"})) &&
+           ((stringIn(object, "module", {"openUrl", "webview"}) &&
+             stringField(object, "url") && !stringField(object, "url")->empty()) ||
+            !stringIn(object, "module", {"openUrl", "webview"})) &&
+           (!field(object, "timeoutMs") || isInteger(field(object, "timeoutMs"), 0)) &&
+           (!field(object, "responseType") ||
+            stringIn(object, "responseType", {"text", "json"})) &&
+           (!field(object, "headers") || validStringMap(objectField(object, "headers")));
   case CoreMessageKind::DeviceGetInfo:
     return exactFields(object,
                        {"schemaVersion", "kind", "requestId", "surfaceId"}) &&
            validSchemaAndKind(object, "deviceGetInfo") && jsRequest() &&
            validSurface(object, "surfaceId");
+  case CoreMessageKind::TimerStart:
+    return exactFields(object,
+                       {"schemaVersion", "kind", "requestId", "surfaceId",
+                        "delayMs", "periodMs"}) &&
+           validSchemaAndKind(object, "timerStart") && jsRequest() &&
+           validSurface(object, "surfaceId") &&
+           isInteger(field(object, "delayMs"), 0) &&
+           isInteger(field(object, "periodMs"), 0);
+  case CoreMessageKind::TimerCancel:
+    return exactFields(object,
+                       {"schemaVersion", "kind", "requestId", "surfaceId",
+                        "timerId"}) &&
+           validSchemaAndKind(object, "timerCancel") && jsRequest() &&
+           validSurface(object, "surfaceId") &&
+           stringField(object, "timerId") &&
+           hasPrefix(*stringField(object, "timerId"), "tmr:");
   case CoreMessageKind::SetTitleBar:
     return exactFields(object,
                        {"schemaVersion", "kind", "requestId", "surfaceId",
@@ -450,6 +502,17 @@ std::optional<std::string> optionalText(const RuntimeValue::Object &object,
   return value ? std::optional<std::string>(*value) : std::nullopt;
 }
 
+std::vector<FeatureHeader> decodeFeatureHeaders(const RuntimeValue::Object &object) {
+  std::vector<FeatureHeader> result;
+  const auto *headers = objectField(object, "headers");
+  if (headers == nullptr) return result;
+  result.reserve(headers->size());
+  for (const auto &[name, value] : *headers) {
+    result.push_back({name, std::get<std::string>(value.storage())});
+  }
+  return result;
+}
+
 MessageRuntimeError decodeError(const RuntimeValue::Object &object) {
   return {text(object, "code"),
           text(object, "message"),
@@ -482,6 +545,8 @@ BindingValues decodeBindings(const RuntimeValue::Object &object) {
     const auto numericId = static_cast<std::uint64_t>(std::stoull(id));
     if (const auto *stringValue = std::get_if<std::string>(&value.storage())) {
       result.emplace(numericId, *stringValue);
+    } else if (const auto *numberValue = std::get_if<double>(&value.storage())) {
+      result.emplace(numericId, *numberValue);
     } else {
       result.emplace(numericId, std::get<bool>(value.storage()));
     }
@@ -529,6 +594,8 @@ RenderOperation decodeRenderOperation(const RuntimeValue &value) {
   if (const auto *stringValue =
           std::get_if<std::string>(&valueField->storage())) {
     binding = *stringValue;
+  } else if (const auto *numberValue = std::get_if<double>(&valueField->storage())) {
+    binding = *numberValue;
   } else {
     binding = std::get<bool>(valueField->storage());
   }
@@ -661,7 +728,13 @@ bool validCallback(const JsInboundMessage &message, const ValueLimits &limits) {
                  validLogicalNode(typed.target) &&
                  validLogicalNode(typed.currentTarget) &&
                  hasPrefix(typed.handlerId, "hdl:") &&
-                 typed.eventType == "click" &&
+                 (typed.eventType == "click" || typed.eventType == "input" ||
+                  typed.eventType == "change" || typed.eventType == "focus" ||
+                  typed.eventType == "scroll" || typed.eventType == "scrollend" ||
+                  typed.eventType == "scrolltop" || typed.eventType == "scrollbottom" ||
+                  typed.eventType == "prepared" || typed.eventType == "start" ||
+                  typed.eventType == "pause" || typed.eventType == "finish" ||
+                  typed.eventType == "error" || typed.eventType == "timeupdate") &&
                  (typed.phase == "target" || typed.phase == "bubble") &&
                  std::isfinite(typed.timestamp) && typed.timestamp >= 0 &&
                  validDynamicValues(typed.payload, limits);
@@ -712,19 +785,51 @@ bool validCallback(const JsInboundMessage &message, const ValueLimits &limits) {
                                hasPrefix(*typed.revealedSurfaceId, "srf:"));
         } else if constexpr (std::is_same_v<T, DeviceGetInfoResult>) {
           const bool failed = typed.status == "failed";
+          const bool unsupported = typed.status == "unsupported";
           return validJsRequestId(typed.requestId) &&
                  hasPrefix(typed.surfaceId, "srf:") &&
-                 (failed || typed.status == "completed") &&
-                 validTypedError(typed.error, failed) &&
-                 (failed ? !typed.info : typed.info.has_value());
+                 (failed || unsupported || typed.status == "completed") &&
+                 validTypedError(typed.error, failed || unsupported) &&
+                 ((failed || unsupported) ? !typed.info : typed.info.has_value());
+        } else if constexpr (std::is_same_v<T, TimerStartResult>) {
+          const bool failed = typed.status == "failed";
+          const bool unsupported = typed.status == "unsupported";
+          return validJsRequestId(typed.requestId) &&
+                 hasPrefix(typed.surfaceId, "srf:") &&
+                 (failed || unsupported || typed.status == "completed") &&
+                 validTypedError(typed.error, failed || unsupported) &&
+                 ((failed || unsupported)
+                      ? !typed.timerId
+                      : typed.timerId && hasPrefix(*typed.timerId, "tmr:"));
+        } else if constexpr (std::is_same_v<T, TimerCancelResult>) {
+          const bool failed = typed.status == "failed";
+          const bool unsupported = typed.status == "unsupported";
+          return validJsRequestId(typed.requestId) &&
+                 hasPrefix(typed.surfaceId, "srf:") &&
+                 hasPrefix(typed.timerId, "tmr:") &&
+                 (failed || unsupported || typed.status == "completed") &&
+                 validTypedError(typed.error, failed || unsupported);
+        } else if constexpr (std::is_same_v<T, TimerFired>) {
+          return hasPrefix(typed.surfaceId, "srf:") &&
+                 hasPrefix(typed.timerId, "tmr:") && typed.sequence > 0;
+        } else if constexpr (std::is_same_v<T, FeatureResult>) {
+          const bool failed = typed.status == "failed";
+          const bool unsupported = typed.status == "unsupported";
+          const bool cancelled = typed.status == "cancelled";
+          const bool terminalFailure = failed || unsupported || cancelled;
+          return validJsRequestId(typed.requestId) &&
+                 hasPrefix(typed.surfaceId, "srf:") &&
+                 (terminalFailure || typed.status == "completed") &&
+                 validTypedError(typed.error, failed || unsupported);
         } else if constexpr (std::is_same_v<T, ShowToastResult> ||
                              std::is_same_v<T, SetTitleBarResult> ||
                              std::is_same_v<T, SetMetaResult>) {
           const bool failed = typed.status == "failed";
+          const bool unsupported = typed.status == "unsupported";
           return validJsRequestId(typed.requestId) &&
                  hasPrefix(typed.surfaceId, "srf:") &&
-                 (failed || typed.status == "completed") &&
-                 validTypedError(typed.error, failed);
+                 (failed || unsupported || typed.status == "completed") &&
+                 validTypedError(typed.error, failed || unsupported);
         } else if constexpr (std::is_same_v<T, SurfaceStatusChanged>) {
           static const std::set<std::string, std::less<>> lifecycle{
               "creating", "awaitingTemplate", "mounting", "presenting",
@@ -803,9 +908,43 @@ DecodeCoreResult decodeCoreMessage(CoreMessageKind expectedKind,
       return DecodeCoreResult::success(ShowToast{
           text(*object, "requestId"), text(*object, "surfaceId"),
           text(*object, "message"), integer(*object, "durationMs")});
+    case CoreMessageKind::FeatureRequest: {
+      const auto module = text(*object, "module");
+      const auto method = text(*object, "method");
+      const auto moduleValue = module == "prompt" ? FeatureModule::Prompt : module == "fetch" ? FeatureModule::Fetch : module == "file" ? FeatureModule::File : module == "openUrl" ? FeatureModule::OpenUrl : FeatureModule::Webview;
+      FeatureMethod methodValue = FeatureMethod::Alert;
+      if (method == "confirm") methodValue = FeatureMethod::Confirm;
+      else if (method == "fetch") methodValue = FeatureMethod::Fetch;
+      else if (method == "cancel") methodValue = FeatureMethod::FetchCancel;
+      else if (method == "read") methodValue = FeatureMethod::FileRead;
+      else if (method == "write") methodValue = FeatureMethod::FileWrite;
+      else if (method == "exists") methodValue = FeatureMethod::FileExists;
+      else if (method == "delete") methodValue = FeatureMethod::FileDelete;
+      else if (method == "open") methodValue = module == "openUrl" ? FeatureMethod::OpenUrl : FeatureMethod::WebviewOpen;
+      FeatureRequest request{text(*object, "requestId"), text(*object, "surfaceId"),
+                             moduleValue, methodValue,
+                             object->contains("text") ? text(*object, "text") : "",
+                             object->contains("url") ? text(*object, "url") : "",
+                             object->contains("httpMethod") ? text(*object, "httpMethod") : "",
+                             decodeFeatureHeaders(*object), object->contains("body") ? std::optional<std::string>(text(*object, "body")) : std::nullopt,
+                             object->contains("timeoutMs") ? integer(*object, "timeoutMs") : 0,
+                             object->contains("responseType") ? text(*object, "responseType") : "",
+                             object->contains("targetRequestId") ? text(*object, "targetRequestId") : "",
+                             object->contains("path") ? text(*object, "path") : "",
+                             object->contains("data") ? std::optional<std::string>(text(*object, "data")) : std::nullopt};
+      return DecodeCoreResult::success(std::move(request));
+    }
     case CoreMessageKind::DeviceGetInfo:
       return DecodeCoreResult::success(DeviceGetInfo{
           text(*object, "requestId"), text(*object, "surfaceId")});
+    case CoreMessageKind::TimerStart:
+      return DecodeCoreResult::success(TimerStart{
+          text(*object, "requestId"), text(*object, "surfaceId"),
+          integer(*object, "delayMs"), integer(*object, "periodMs")});
+    case CoreMessageKind::TimerCancel:
+      return DecodeCoreResult::success(TimerCancel{
+          text(*object, "requestId"), text(*object, "surfaceId"),
+          text(*object, "timerId")});
     case CoreMessageKind::SetTitleBar:
       return DecodeCoreResult::success(SetTitleBar{
           text(*object, "requestId"), text(*object, "surfaceId"),
@@ -923,8 +1062,14 @@ expectedResultKind(const CoreInboundMessage &message) {
     return JsCallbackKind::NavigationCloseResult;
   case CoreMessageKind::ShowToast:
     return JsCallbackKind::ShowToastResult;
+  case CoreMessageKind::FeatureRequest:
+    return JsCallbackKind::FeatureResult;
   case CoreMessageKind::DeviceGetInfo:
     return JsCallbackKind::DeviceGetInfoResult;
+  case CoreMessageKind::TimerStart:
+    return JsCallbackKind::TimerStartResult;
+  case CoreMessageKind::TimerCancel:
+    return JsCallbackKind::TimerCancelResult;
   case CoreMessageKind::SetTitleBar:
     return JsCallbackKind::SetTitleBarResult;
   case CoreMessageKind::SetMeta:
@@ -949,7 +1094,8 @@ callbackCorrelation(const JsInboundMessage &message) {
         if constexpr (std::is_same_v<T, RenderTransactionResult>) {
           return CorrelationKey{CorrelationKeyKind::Transaction,
                                 typed.transactionId};
-        } else if constexpr (std::is_same_v<T, AppContext> ||
+        } else if constexpr (std::is_same_v<T, TimerFired> ||
+                             std::is_same_v<T, AppContext> ||
                              std::is_same_v<T, SurfaceContext> ||
                              std::is_same_v<T, SurfaceStatusChanged>) {
           return std::nullopt;
@@ -992,7 +1138,10 @@ bool callbackIsResult(const JsInboundMessage &message) {
   case JsCallbackKind::NavigationPushResult:
   case JsCallbackKind::NavigationCloseResult:
   case JsCallbackKind::ShowToastResult:
+  case JsCallbackKind::FeatureResult:
   case JsCallbackKind::DeviceGetInfoResult:
+  case JsCallbackKind::TimerStartResult:
+  case JsCallbackKind::TimerCancelResult:
   case JsCallbackKind::SetTitleBarResult:
   case JsCallbackKind::SetMetaResult:
     return true;
@@ -1002,6 +1151,7 @@ bool callbackIsResult(const JsInboundMessage &message) {
   case JsCallbackKind::VmInitializationDispatch:
   case JsCallbackKind::LifecycleDispatch:
   case JsCallbackKind::JsEventDispatch:
+  case JsCallbackKind::TimerFired:
   case JsCallbackKind::SurfaceStatusChanged:
     return false;
   }
