@@ -80,11 +80,14 @@ AlphaInitialBindingStage::evaluateOnExecutor(
       } else if (const auto *flag =
                      std::get_if<bool>(&converted.value().storage())) {
         snapshot.values.emplace(entry.templateBindingId, *flag);
+      } else if (const auto *number =
+                     std::get_if<double>(&converted.value().storage())) {
+        snapshot.values.emplace(entry.templateBindingId, *number);
       } else {
         return Result<InitialBindingSnapshot,
                       vm::PageInitializationStageError>::failure(
             stageError("MODULE_ABI_UNSUPPORTED",
-                       "Initial binding result must be string or boolean"));
+                       "Initial binding result must be string, boolean, or number"));
       }
     }
     return Result<InitialBindingSnapshot,

@@ -1583,6 +1583,44 @@ void verifyTypedMessageExtraction() {
   CHECK(operation.templateBindingId == 9);
   CHECK(!std::get<bool>(operation.value));
 
+  auto verifyUpdateBindingValue = [&](RuntimeValue value, auto verify) {
+    auto candidate = outbound(CoreMessageKind::SubmitRenderTransaction);
+    auto &candidateObject = std::get<RuntimeValue::Object>(candidate.storage());
+    candidateObject["operations"] = RuntimeValue(RuntimeValue::Array{
+        RuntimeValue(object({{"kind", RuntimeValue("updateBinding")},
+                             {"ownerInstanceId", RuntimeValue("cmp:1")},
+                             {"templateBindingId", RuntimeValue(9.0)},
+                             {"value", std::move(value)}}))});
+    auto decodedCandidate = decodeCoreMessage(
+        CoreMessageKind::SubmitRenderTransaction, candidate,
+        ValueLimits{32, 2048});
+    CHECK(decodedCandidate.ok());
+    if (!decodedCandidate.ok()) return;
+    const auto &candidateOperation = std::get<UpdateBindingOperation>(
+        std::get<SubmitRenderTransaction>(decodedCandidate.value())
+            .operations.at(0));
+    verify(candidateOperation.value);
+  };
+  verifyUpdateBindingValue(RuntimeValue("tab"), [](const BindingValue &value) {
+    CHECK(std::get<std::string>(value) == "tab");
+  });
+  verifyUpdateBindingValue(RuntimeValue(true), [](const BindingValue &value) {
+    CHECK(std::get<bool>(value));
+  });
+  verifyUpdateBindingValue(RuntimeValue(2.0), [](const BindingValue &value) {
+    CHECK(std::get<double>(value) == 2.0);
+  });
+  auto invalidUpdate = outbound(CoreMessageKind::SubmitRenderTransaction);
+  auto &invalidUpdateObject = std::get<RuntimeValue::Object>(invalidUpdate.storage());
+  invalidUpdateObject["operations"] = RuntimeValue(RuntimeValue::Array{
+      RuntimeValue(object({{"kind", RuntimeValue("updateBinding")},
+                           {"ownerInstanceId", RuntimeValue("cmp:1")},
+                           {"templateBindingId", RuntimeValue(9.0)},
+                           {"value", RuntimeValue(RuntimeValue::Array{})}}))});
+  CHECK(!decodeCoreMessage(CoreMessageKind::SubmitRenderTransaction,
+                           invalidUpdate, ValueLimits{32, 2048})
+             .ok());
+
   auto navigation = outbound(CoreMessageKind::NavigationPush);
   auto &navigationObject = std::get<RuntimeValue::Object>(navigation.storage());
   navigationObject["params"] =
@@ -1615,6 +1653,45 @@ void verifyTabsEventCodec() {
   CHECK(validateJsInboundMessage(message, ValueLimits{32, 2048}).ok());
 }
 
+void verifyTabsSelectedNumberReachesRenderTransaction() {
+  Harness harness(std::make_unique<QuickJsEngineProvider>());
+  harness.startAbi();
+  harness.openSurface("srf:tabs");
+  const auto installed = harness.evaluate(R"JS(
+    globalThis.__tabs_change_handler__ = function(event) {
+      return $quickapp_runtime_v1_submitRenderTransaction$({
+        schemaVersion: 1,
+        surfaceId: "srf:tabs",
+        transactionId: "txn:srf-tabs-1",
+        revision: 1,
+        operations: [{
+          kind: "updateBinding",
+          ownerInstanceId: "cmp:srf-tabs",
+          templateBindingId: 1,
+          value: event.index
+        }]
+      });
+    };
+    true;
+  )JS");
+  (void)installed;
+  const auto result = harness.callBinding(
+      "__tabs_change_handler__",
+      {RuntimeValue(RuntimeValue::Object{{"index", RuntimeValue(2.0)},
+                                         {"value", RuntimeValue("我的")}})});
+  CHECK(enqueueOk(result));
+  CHECK(harness.core.messageCount() == 1);
+  const auto transaction = std::get<SubmitRenderTransaction>(
+      harness.core.messageAt(0));
+  CHECK(transaction.transactionId == "txn:srf-tabs-1");
+  CHECK(transaction.operations.size() == 1);
+  const auto &update = std::get<UpdateBindingOperation>(
+      transaction.operations.at(0));
+  CHECK(update.templateBindingId == 1);
+  CHECK(std::get<double>(update.value) == 2.0);
+  harness.stop();
+}
+
 void run(std::string_view name, const std::function<void()> &test) {
   test();
   std::cout << "PASS " << name << '\n';
@@ -1629,6 +1706,8 @@ int main() {
     run("JS-S02 typed message extraction", verifyTypedMessageExtraction);
     run("JS-S02 scroll event codec", verifyScrollEventCodec);
     run("JS-S02 tabs event codec", verifyTabsEventCodec);
+    run("JS-S02 tabs selected number render transaction",
+        verifyTabsSelectedNumberReachesRenderTransaction);
     run("JS-S02 identity failure", verifyIdentityFailure);
     run("JS-S02 partial binding rollback", verifyPartialBindingRollback);
     run("JS-S02 callback queue overflow", verifyCallbackQueueOverflow);

@@ -252,7 +252,8 @@ bool validRenderOperation(const RuntimeValue &value) {
            owner && (hasPrefix(*owner, "cmp:") || hasPrefix(*owner, "blk:")) &&
            isInteger(field(*object, "templateBindingId"), 1) && bindingValue &&
            (std::holds_alternative<std::string>(bindingValue->storage()) ||
-            std::holds_alternative<bool>(bindingValue->storage()));
+            std::holds_alternative<bool>(bindingValue->storage()) ||
+            std::holds_alternative<double>(bindingValue->storage()));
   }
   if (*kind == "instantiateBlock") {
     const auto *parent = objectField(*object, "parent");

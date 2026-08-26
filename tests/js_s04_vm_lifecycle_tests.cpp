@@ -104,7 +104,9 @@ LoadVerifiedModule module(std::string requestId, std::string kind, std::string m
 constexpr std::string_view kApp =
     "$app_define$(\"app\", [], function(require, module, exports) { module.exports = {schemaVersion: 1, kind: \"app\", createAppVm: function(context) { return {}; }}; }); $app_bootstrap$(\"app\", {schemaVersion: 1, kind: \"app\", moduleId: \"app\"});";
 constexpr std::string_view kPage =
-    "$app_define$(\"pages/index\", [], function(require, module, exports) { const router = require(\"@app-module/system.router\").default; module.exports = {schemaVersion: 1, kind: \"page\", createPageVm: function(context) { return {private: {title: \"Hello\"}, router: router, onInit: function() { this.$page.setTitleBar({text: \"Welcome\"}); this.$page.setMeta({title: \"Case 001\", description: \"Alpha S1\"}); }}; }, bindingEvaluators: {\"1\": function(scope) { return this.private.title; }, \"2\": function(scope) { return true; }}, handlerMethods: {}}; }); $app_bootstrap$(\"pages/index\", {schemaVersion: 1, kind: \"page\", moduleId: \"pages/index\", templateId: \"tpl:pages/index\"});";
+    "$app_define$(\"pages/index\", [], function(require, module, exports) { const router = require(\"@app-module/system.router\").default; module.exports = {schemaVersion: 1, kind: \"page\", createPageVm: function(context) { return {private: {title: \"Hello\"}, router: router, __qak_initial_blocks__: [], onInit: function() { this.$page.setTitleBar({text: \"Welcome\"}); this.$page.setMeta({title: \"Case 001\", description: \"Alpha S1\"}); }}; }, bindingEvaluators: {\"1\": function(scope) { return this.private.title; }, \"2\": function(scope) { return true; }, \"3\": function(scope) { return 1; }}, handlerMethods: {}}; }); $app_bootstrap$(\"pages/index\", {schemaVersion: 1, kind: \"page\", moduleId: \"pages/index\", templateId: \"tpl:pages/index\"});";
+constexpr std::string_view kInvalidBindingPage =
+    "$app_define$(\"pages/invalid\", [], function(require, module, exports) { module.exports = {schemaVersion: 1, kind: \"page\", createPageVm: function(context) { return {private: {}}; }, bindingEvaluators: {\"9\": function(scope) { return {bad: true}; }}, handlerMethods: {}}; }); $app_bootstrap$(\"pages/invalid\", {schemaVersion: 1, kind: \"page\", moduleId: \"pages/invalid\", templateId: \"tpl:pages/invalid\"});";
 
 template <typename Function> auto onExecutor(JsEngineService &service, Function function) {
   using Return = decltype(function(std::declval<JsEnginePort &>(), std::declval<const JsContextRef &>()));
@@ -182,9 +184,32 @@ void run() {
     CHECK(abi->registerConsumersOnExecutor(std::move(slots)).ok()); CHECK(vm->startOnExecutor(js, context));
     loader->onLoadVerifiedModule(module("req:j-1", "app", "app", "appRuntime", std::nullopt, std::string(kApp), "8b70a7994f6240d8de4db434ff135a70fec05d8b132238968f98a6b0ad6e2bf6", BootstrapExpectation{"app", "app", std::nullopt}, std::nullopt, std::nullopt));
     CHECK(loader->openSurfaceOnExecutor("srf:1"));
-    loader->onLoadVerifiedModule(module("req:j-2", "page", "pages/index", "surface", "srf:1", std::string(kPage), "8540d6556a9552f5a9dc0ad9f255fbc46850f1d5c298c3e66cdc4a0e7d5eac48", BootstrapExpectation{"page", "pages/index", "tpl:pages/index"}, std::vector<std::uint64_t>{1, 2}, std::vector<std::uint64_t>{}));
+    loader->onLoadVerifiedModule(module("req:j-2", "page", "pages/index", "surface", "srf:1", std::string(kPage), "25ec9a8b5724de9d0697124e69ff59bb3928f88bacdd64cc529ac01c36c5bf26", BootstrapExpectation{"page", "pages/index", "tpl:pages/index"}, std::vector<std::uint64_t>{1, 2, 3}, std::vector<std::uint64_t>{}));
     CHECK(completion.values.size() == 2); CHECK(completion.values[0].status == "loaded");
-    CHECK(completion.values[1].status == "loaded"); return true;
+    CHECK(completion.values[1].status == "loaded");
+
+    CHECK(loader->openSurfaceOnExecutor("srf:invalid"));
+    loader->onLoadVerifiedModule(module(
+        "req:j-3", "page", "pages/invalid", "surface", "srf:invalid",
+        std::string(kInvalidBindingPage),
+        "27cf49d40d433b61fb77087029b0f56fa9c2bd9620e4dd44b22f3dab0fea4e39",
+        BootstrapExpectation{"page", "pages/invalid", "tpl:pages/invalid"},
+        std::vector<std::uint64_t>{9}, std::vector<std::uint64_t>{}));
+    auto invalidDefinition =
+        loader->pageDefinitionForSurfaceOnExecutor("srf:invalid",
+                                                   "tpl:pages/invalid");
+    CHECK(invalidDefinition.has_value());
+    auto invalidVm = loader->createVmOnExecutor(
+        *invalidDefinition, RuntimeValue(RuntimeValue::Object{}));
+    CHECK(invalidVm.ok());
+    auto invalidBinding =
+        bindingStage->evaluateOnExecutor(*invalidDefinition, invalidVm.value());
+    CHECK(!invalidBinding.ok());
+    CHECK(invalidBinding.error().code == "MODULE_ABI_UNSUPPORTED");
+    CHECK(invalidBinding.error().message ==
+          "Initial binding result must be string, boolean, or number");
+    CHECK(loader->closeSurfaceOnExecutor("srf:invalid"));
+    return true;
   });
   onExecutor(engine, [&](JsEnginePort &, const JsContextRef &) {
     vm->onAppContext(AppContext{"pkg:1", "1.0", "1", 1, {}});
@@ -204,13 +229,15 @@ void run() {
   CHECK(meta.requestId == "req:j-5" && meta.surfaceId == "srf:1" &&
         meta.title == "Case 001" && meta.description == "Alpha S1");
   CHECK(messageKind(messages[3]) == CoreMessageKind::CompleteVmInitialization);
-  const auto &complete = std::get<CompleteVmInitialization>(messages[3]); CHECK(complete.scope == "page"); CHECK(complete.status == "completed");
+  const auto &complete = std::get<CompleteVmInitialization>(messages[3]);
+  CHECK(complete.scope == "page"); CHECK(complete.status == "completed");
   CHECK(messageKind(messages[4]) == CoreMessageKind::InstantiateTemplate);
   const auto &instantiate = std::get<InstantiateTemplate>(messages[4]);
   CHECK(instantiate.requestId == "req:j-6");
   CHECK(instantiate.ownerInstanceId == "cmp:srf:1");
   CHECK(std::get<std::string>(instantiate.initialBindings.at(1)) == "Hello");
   CHECK(std::get<bool>(instantiate.initialBindings.at(2)));
+  CHECK(std::get<double>(instantiate.initialBindings.at(3)) == 1.0);
   CHECK(onExecutor(engine, [&](JsEnginePort &, const JsContextRef &) { return vm->resources().pageVms == 1; }));
   onExecutor(engine, [&](JsEnginePort &, const JsContextRef &) { vm->closeSurfaceOnExecutor("srf:1"); vm->stopOnExecutor(); transactionBuilder->stopOnExecutor(); bindingStage->stopOnExecutor(); pageControls->stopOnExecutor(); abi->stopOnExecutor(); loader->stopOnExecutor(); facades->stopOnExecutor(); return true; });
   CHECK(onExecutor(engine, [&](JsEnginePort &, const JsContextRef &) { return vm->resources().pageVms == 0 && vm->resources().appVms == 0; }));
