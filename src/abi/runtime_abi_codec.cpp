@@ -665,6 +665,24 @@ bool validDynamicValues(const DynamicValues &values, const ValueLimits &limits) 
   return validateRuntimeValue(RuntimeValue(values), limits).ok();
 }
 
+bool validVideoEventPayload(std::string_view eventType,
+                            const DynamicValues &payload) {
+  if (eventType == "timeupdate") {
+    const auto found = payload.find("currentTime");
+    if (found == payload.end() ||
+        !std::holds_alternative<double>(found->second.storage())) return false;
+    const double value = std::get<double>(found->second.storage());
+    return std::isfinite(value) && value >= 0;
+  }
+  if (eventType == "error") {
+    const auto found = payload.find("code");
+    return found != payload.end() &&
+           std::holds_alternative<std::string>(found->second.storage()) &&
+           !std::get<std::string>(found->second.storage()).empty();
+  }
+  return true;
+}
+
 bool withinNodeBudget(std::size_t nodes, const ValueLimits &limits) {
   return nodes <= limits.maxNodes;
 }
@@ -738,7 +756,8 @@ bool validCallback(const JsInboundMessage &message, const ValueLimits &limits) {
                   typed.eventType == "error" || typed.eventType == "timeupdate") &&
                  (typed.phase == "target" || typed.phase == "bubble") &&
                  std::isfinite(typed.timestamp) && typed.timestamp >= 0 &&
-                 validDynamicValues(typed.payload, limits);
+                 validDynamicValues(typed.payload, limits) &&
+                 validVideoEventPayload(typed.eventType, typed.payload);
         } else if constexpr (std::is_same_v<T, InstantiateTemplateResult>) {
           const bool failed = typed.status == "failed";
           return validJsRequestId(typed.requestId) &&

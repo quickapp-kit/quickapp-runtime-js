@@ -1692,6 +1692,28 @@ void verifyTabsSelectedNumberReachesRenderTransaction() {
   harness.stop();
 }
 
+void verifyVideoLifecyclePayloadCodec() {
+  const auto base = [](std::string eventType, DynamicValues payload) {
+    return JsInboundMessage(JsEventDispatch{
+        "req:p-3", "srf:video", "hdl:video", std::move(eventType), "target",
+        LogicalNodeRef{"cmp:video", 1}, LogicalNodeRef{"cmp:video", 1}, 1.0,
+        std::move(payload)});
+  };
+  CHECK(validateJsInboundMessage(base("prepared", {}), ValueLimits{32, 2048}).ok());
+  CHECK(validateJsInboundMessage(
+            base("timeupdate", {{"currentTime", RuntimeValue(1.5)}}),
+            ValueLimits{32, 2048}).ok());
+  CHECK(validateJsInboundMessage(
+            base("error", {{"code", RuntimeValue("MEDIA_DECODE")}}),
+            ValueLimits{32, 2048}).ok());
+  CHECK(!validateJsInboundMessage(
+             base("timeupdate", {{"currentTime", RuntimeValue(-1.0)}}),
+             ValueLimits{32, 2048}).ok());
+  CHECK(!validateJsInboundMessage(
+             base("error", {{"code", RuntimeValue(1.0)}}),
+             ValueLimits{32, 2048}).ok());
+}
+
 void run(std::string_view name, const std::function<void()> &test) {
   test();
   std::cout << "PASS " << name << '\n';
@@ -1708,6 +1730,7 @@ int main() {
     run("JS-S02 tabs event codec", verifyTabsEventCodec);
     run("JS-S02 tabs selected number render transaction",
         verifyTabsSelectedNumberReachesRenderTransaction);
+    run("JS-S02 video lifecycle payload codec", verifyVideoLifecyclePayloadCodec);
     run("JS-S02 identity failure", verifyIdentityFailure);
     run("JS-S02 partial binding rollback", verifyPartialBindingRollback);
     run("JS-S02 callback queue overflow", verifyCallbackQueueOverflow);
