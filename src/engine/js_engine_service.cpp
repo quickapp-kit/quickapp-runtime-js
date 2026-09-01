@@ -17,14 +17,18 @@ JsEngineService::JsEngineService(std::string appRuntimeId,
                                  JsEngineConfig engineConfig,
                                  const MonotonicClock &clock,
                                  TraceSinkRegistration sink,
-                                 ObservationConfig observationConfig)
+                                 ObservationConfig observationConfig,
+                                 std::unique_ptr<EventLoopBackend> backend)
     : appRuntimeId_(std::move(appRuntimeId)), provider_(std::move(provider)),
       engineConfig_(std::move(engineConfig)),
       observation_(clock, sink.sink(), std::move(observationConfig)),
-      executor_(engineConfig_.limits.maxPendingTasks,
-                [this](std::size_t depth) {
-                  static_cast<void>(observation_.emitQueueOverflow(depth));
-                }) {
+      backend_(backend ? std::move(backend)
+                       : std::make_unique<JsExecutorBackend>(
+                             engineConfig_.limits.maxPendingTasks,
+                             [this](std::size_t depth) {
+                               static_cast<void>(
+                                   observation_.emitQueueOverflow(depth));
+                             })) {
   engineConfig_.onOutOfMemory = [this] {
     static_cast<void>(observation_.emitOutOfMemory());
   };
@@ -50,12 +54,12 @@ bool JsEngineService::start(StartCallback callback) {
       engineConfig_.limits.maxMicrotasksPerTurn == 0 ||
       engineConfig_.limits.maxRuntimeValueDepth == 0 ||
       engineConfig_.limits.maxRuntimeValueNodes == 0 ||
-      !executor_.start(ExecutorMode::OwnedThread)) {
+      !backend_->start(ExecutorMode::OwnedThread)) {
     state_.store(EngineServiceState::Stopped, std::memory_order_release);
     return false;
   }
 
-  const auto posted = executor_.post(ExecutorTask{
+  const auto posted = backend_->post(ExecutorTask{
       .run =
           [this, callback = std::move(callback)]() mutable {
             initializeOnExecutor(std::move(callback));
@@ -74,7 +78,7 @@ PostResult JsEngineService::post(EngineTask task,
   if (state() != EngineServiceState::Running) {
     return {PostStatus::Stopping, 0};
   }
-  const auto result = executor_.post(ExecutorTask{
+  const auto result = backend_->post(ExecutorTask{
       .run =
           [this, task = std::move(task)]() mutable {
             if (engine_ && context_.valid()) {
@@ -84,7 +88,7 @@ PostResult JsEngineService::post(EngineTask task,
       .onCancelled = std::move(onCancelled),
   });
   if (result.status == PostStatus::Accepted) {
-    static_cast<void>(observation_.emitQueueDepth(executor_.pendingDepth()));
+    static_cast<void>(observation_.emitQueueDepth(backend_->pendingDepth()));
   }
   return result;
 }
@@ -95,7 +99,7 @@ PostResult JsEngineService::postOperation(EngineOperation operation,
   if (state() != EngineServiceState::Running) {
     return {PostStatus::Stopping, 0};
   }
-  const auto result = executor_.post(ExecutorTask{
+  const auto result = backend_->post(ExecutorTask{
       .run =
           [this, operation = std::move(operation),
            callback = std::move(callback)]() mutable {
@@ -128,7 +132,7 @@ PostResult JsEngineService::postOperation(EngineOperation operation,
       .onCancelled = std::move(onCancelled),
   });
   if (result.status == PostStatus::Accepted) {
-    static_cast<void>(observation_.emitQueueDepth(executor_.pendingDepth()));
+    static_cast<void>(observation_.emitQueueDepth(backend_->pendingDepth()));
   }
   return result;
 }
@@ -160,7 +164,7 @@ bool JsEngineService::stop(std::function<void()> upperLayerTeardown,
                                       std::memory_order_acq_rel)) {
     return false;
   }
-  return executor_.beginStop(
+  return backend_->beginStop(
       [this, upperLayerTeardown = std::move(upperLayerTeardown)]() mutable {
         teardownOnExecutor(std::move(upperLayerTeardown));
       },
@@ -227,7 +231,7 @@ void JsEngineService::teardownOnExecutor(
 void JsEngineService::failStart(RuntimeError error,
                                 StartCallback callback) noexcept {
   state_.store(EngineServiceState::Failed, std::memory_order_release);
-  const bool stopping = executor_.beginStop(
+  const bool stopping = backend_->beginStop(
       [this] {
         context_ = JsContextRef{};
         engine_.reset();
@@ -248,7 +252,7 @@ void JsEngineService::failRunningEngine() noexcept {
                                       std::memory_order_acq_rel)) {
     return;
   }
-  const bool stopping = executor_.beginStop(
+  const bool stopping = backend_->beginStop(
       [this] {
         context_ = JsContextRef{};
         engine_.reset();
@@ -261,7 +265,7 @@ void JsEngineService::failRunningEngine() noexcept {
 
 PostResult JsEngineService::enqueueMicrotaskContinuation(
     std::function<void(EngineResult<MicrotaskDrain>)> callback) {
-  return executor_.postUniqueMicrotaskContinuation(ExecutorTask{
+  return backend_->postUniqueMicrotaskContinuation(ExecutorTask{
       .run =
           [this, callback = std::move(callback)]() mutable {
             auto result = engine_->drainMicrotasks(

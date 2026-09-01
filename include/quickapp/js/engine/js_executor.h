@@ -6,21 +6,9 @@
 #include <memory>
 #include <thread>
 
+#include "quickapp/js/engine/event_loop_backend.h"
+
 namespace quickapp::js {
-
-enum class ExecutorMode { OwnedThread, ManualPump };
-enum class ExecutorState { New, Running, Quiescing, Stopped };
-enum class PostStatus { Accepted, QueueOverflow, Stopping };
-
-struct PostResult {
-  PostStatus status{PostStatus::Stopping};
-  std::uint64_t sequence{0};
-};
-
-struct ExecutorTask {
-  std::function<void()> run;
-  std::function<void()> onCancelled;
-};
 
 class JsExecutor {
 public:

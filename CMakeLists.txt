@@ -12,6 +12,7 @@ option(QUICKAPP_JS_BUILD_QUICKJS_PROVIDER "Build the QuickJS V1 provider" ON)
 option(QUICKAPP_JS_ENABLE_ASAN "Enable AddressSanitizer" OFF)
 option(QUICKAPP_JS_ENABLE_UBSAN "Enable UndefinedBehaviorSanitizer" OFF)
 option(QUICKAPP_JS_ENABLE_TSAN "Enable ThreadSanitizer" OFF)
+option(QUICKAPP_JS_BUILD_LIBUV_BACKEND "Build the optional libuv EventLoop Backend" OFF)
 
 set(QUICKAPP_JS_QUICKJS_SOURCE_DIR
     "${CMAKE_CURRENT_SOURCE_DIR}/../source/third_party/quickjs"
@@ -57,6 +58,7 @@ quickapp_js_apply_sanitizers(quickapp_js_engine_api)
 
 add_library(quickapp_js_executor STATIC
   src/engine/js_executor.cpp
+  src/engine/js_executor_backend.cpp
   src/engine/js_engine_service.cpp
   src/engine/observation.cpp
 )
@@ -65,6 +67,18 @@ target_include_directories(quickapp_js_executor PRIVATE src)
 target_link_libraries(quickapp_js_executor PUBLIC quickapp_js_engine_api)
 quickapp_js_apply_warnings(quickapp_js_executor)
 quickapp_js_apply_sanitizers(quickapp_js_executor)
+
+if(QUICKAPP_JS_BUILD_LIBUV_BACKEND)
+  find_package(PkgConfig REQUIRED)
+  pkg_check_modules(LIBUV REQUIRED IMPORTED_TARGET libuv)
+  add_library(quickapp_js_event_loop_libuv STATIC
+    src/engine/libuv_event_loop_backend.cpp)
+  target_include_directories(quickapp_js_event_loop_libuv PUBLIC include)
+  target_link_libraries(quickapp_js_event_loop_libuv PUBLIC
+    quickapp_js_engine_api PkgConfig::LIBUV)
+  quickapp_js_apply_warnings(quickapp_js_event_loop_libuv)
+  quickapp_js_apply_sanitizers(quickapp_js_event_loop_libuv)
+endif()
 
 add_library(quickapp_js_runtime_abi STATIC
   src/abi/runtime_abi_types.cpp
@@ -229,6 +243,20 @@ if(QUICKAPP_JS_BUILD_TESTS)
   quickapp_js_apply_warnings(js_s01_contract_tests)
   quickapp_js_apply_sanitizers(js_s01_contract_tests)
   add_test(NAME js_s01_contract_tests COMMAND js_s01_contract_tests)
+
+  add_executable(js_event_loop_backend_tests
+    tests/event_loop_backend_tests.cpp
+  )
+  target_link_libraries(js_event_loop_backend_tests PRIVATE quickapp_js_executor)
+  quickapp_js_apply_warnings(js_event_loop_backend_tests)
+  quickapp_js_apply_sanitizers(js_event_loop_backend_tests)
+  add_test(NAME js_event_loop_backend_tests COMMAND js_event_loop_backend_tests)
+  if(QUICKAPP_JS_BUILD_LIBUV_BACKEND)
+    target_link_libraries(js_event_loop_backend_tests PRIVATE
+      quickapp_js_event_loop_libuv)
+    target_compile_definitions(js_event_loop_backend_tests PRIVATE
+      QUICKAPP_JS_HAS_LIBUV_BACKEND=1)
+  endif()
 
   add_executable(js_s02_contract_tests tests/js_s02_contract_tests.cpp)
   target_link_libraries(js_s02_contract_tests PRIVATE

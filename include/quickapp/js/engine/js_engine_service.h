@@ -6,7 +6,8 @@
 #include <string>
 
 #include "quickapp/js/engine/js_engine_port.h"
-#include "quickapp/js/engine/js_executor.h"
+#include "quickapp/js/engine/event_loop_backend.h"
+#include "quickapp/js/engine/js_executor_backend.h"
 #include "quickapp/js/engine/observation.h"
 
 namespace quickapp::js {
@@ -35,7 +36,8 @@ public:
                   std::unique_ptr<JsEngineProvider> provider,
                   JsEngineConfig engineConfig, const MonotonicClock &clock,
                   TraceSinkRegistration sink,
-                  ObservationConfig observationConfig);
+                  ObservationConfig observationConfig,
+                  std::unique_ptr<EventLoopBackend> backend = nullptr);
   ~JsEngineService();
 
   JsEngineService(const JsEngineService &) = delete;
@@ -59,8 +61,8 @@ public:
   [[nodiscard]] ObservationEmitter &observation() noexcept {
     return observation_;
   }
-  [[nodiscard]] const JsExecutor &executor() const noexcept {
-    return executor_;
+  [[nodiscard]] const EventLoopBackend &executor() const noexcept {
+    return *backend_;
   }
 
 private:
@@ -75,7 +77,7 @@ private:
   std::unique_ptr<JsEngineProvider> provider_;
   JsEngineConfig engineConfig_;
   ObservationEmitter observation_;
-  JsExecutor executor_;
+  std::unique_ptr<EventLoopBackend> backend_;
   std::unique_ptr<JsEnginePort> engine_;
   JsContextRef context_;
   std::atomic<EngineServiceState> state_{EngineServiceState::New};
