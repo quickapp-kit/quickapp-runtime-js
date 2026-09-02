@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "status": "toolkit-inline",
+  "independentBundle": false,
+  "currentEmitter": "../quickapp-toolkit/src/compiler/emitter/js-module-emitter.ts",
+  "ownedSemantics": [
+    "reactive-state",
+    "component-runtime",
+    "handler-methods",
+    "render-intent",
+    "microtask-flush",
+    "typed-feature-facade"
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "name": "@quickapp-kit/runtime-js-framework",
+  "private": true,
+  "version": "0.0.0-migration",
+  "type": "module",
+  "scripts": {
+    "test": "node test/source-boundary.test.mjs"
+  }
+}

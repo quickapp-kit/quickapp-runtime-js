@@ -1,3 +1,0 @@
-#pragma once
-
-#include "@QUICKAPP_JS_QUICKJS_SOURCE_DIR@/quickjs.h"

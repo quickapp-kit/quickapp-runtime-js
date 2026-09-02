@@ -1,74 +1,37 @@
 # QuickApp Runtime JS
 
-JS engine integration layer for [QuickApp Kit](https://github.com/quickapp-kit). Bridges JavaScript execution to the C++ runtime core.
+Pure JavaScript Framework boundary for QuickApp Kit.
 
-## What's here
+## Status
 
-This layer provides the JS execution environment that drives the runtime:
+This repository no longer stores or compiles C/C++ Runtime code. The QuickJS adapter, `JsEngineService`, event loops, module loader, VM host, native binding, and Runtime ABI now live in `quickapp-runtime-core/runtime/js`.
 
-- **Engine API** — abstract JS engine interface (provider-agnostic)
-- **QuickJS Provider** — concrete provider using vendored QuickJS
-- **Module Loader** — JS module resolution and loading
-- **Page Host** — page-level JS context management
-- **VM Lifecycle** — JS VM creation, teardown, memory management
-- **Binding** — native ↔ JS binding layer
-- **Event** — JS event dispatch and handling
-- **Render** — JS-driven render intent generation
+The reactive Framework is not yet a standalone, versioned Bundle consumed by the Runtime. Its real implementation is still emitted inline per page by Toolkit's `js-module-emitter.ts`: Proxy/Watcher, dirty bindings, block reconciliation, render intent, and microtask flushing. `framework/source.json` records that fact, and the boundary test verifies the real emitter directly.
 
-## Requirements
+## Responsibilities
 
-- C++20 / C11 compiler
-- CMake 3.24+
-- Vendored QuickJS source (configurable via `QUICKAPP_JS_QUICKJS_SOURCE_DIR`)
+- Record the single source of current JavaScript Framework behavior.
+- Reject C/C++ source files in this repository.
+- Verify that Toolkit still emits the active reactive path.
+- Host the future versioned Framework Bundle, JavaScript behavior tests, and Bundle build.
 
-## Build
+## Verify
 
 ```bash
-cmake -S . -B build -G Ninja
+npm test
+
+cmake -S . -B build
 cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
-### Sanitizers
+## Open Work
 
-```bash
-cmake -S . -B build-asan -G Ninja \
-  -DQUICKAPP_JS_ENABLE_ASAN=ON -DQUICKAPP_JS_ENABLE_UBSAN=ON
-cmake --build build-asan -j
-ctest --test-dir build-asan --output-on-failure
+- Extract Toolkit's page-inline runtime into a versioned standalone Framework Bundle.
+- Make Toolkit reference that Bundle while preserving the RPK contract.
+- Replace the C++ compatibility facade with the complete typed JavaScript Feature Facade.
 
-cmake -S . -B build-tsan -G Ninja -DQUICKAPP_JS_ENABLE_TSAN=ON
-cmake --build build-tsan -j
-ctest --test-dir build-tsan --output-on-failure
-```
-
-## Project Structure
-
-```
-├── include/quickapp/js/    # Public headers
-├── src/
-│   ├── engine/             # Engine abstraction
-│   ├── binding/            # Native ↔ JS binding
-│   ├── module/             # Module loader
-│   ├── page/               # Page host control
-│   ├── vm/                 # VM lifecycle
-│   ├── event/              # Event dispatch
-│   ├── render/             # Render intent
-│   ├── alpha/              # Alpha integration (initial render, binding, page stage)
-│   ├── framework/          # JS framework facades
-│   └── abi/                # ABI layer
-├── providers/              # Engine providers (QuickJS)
-├── fakes/                  # Test doubles
-├── tests/                  # Contract tests
-├── cmake/                  # Build utilities
-└── tools/                  # Verification scripts
-```
-
-## Related
-
-- [quickapp-runtime-core](https://github.com/quickapp-kit/quickapp-runtime-core) — C++ runtime kernel
-- [quickapp-runtime-android](https://github.com/quickapp-kit/quickapp-runtime-android) — Android adapter
-- [quickapp-runtime-lvgl](https://github.com/quickapp-kit/quickapp-runtime-lvgl) — LVGL adapter
+This migration changes code ownership only; it does not change RPK, Runtime ABI, or runtime behavior.
 
 ## License
 
