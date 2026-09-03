@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "status": "toolkit-inline",
-  "independentBundle": false,
+  "status": "independent-bundle-available",
+  "independentBundle": true,
   "currentEmitter": "../quickapp-toolkit/src/compiler/emitter/js-module-emitter.ts",
   "ownedSemantics": [
     "reactive-state",

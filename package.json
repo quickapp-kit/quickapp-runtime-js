@@ -1,9 +1,10 @@
 {
   "name": "@quickapp-kit/runtime-js-framework",
   "private": true,
-  "version": "0.0.0-migration",
+  "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "test": "node test/source-boundary.test.mjs"
+    "build": "node scripts/build-framework.mjs",
+    "test": "npm run build && node --test test/reactive-page-vm.test.mjs && node test/source-boundary.test.mjs"
   }
 }

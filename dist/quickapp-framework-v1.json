@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "moduleId": "@quickapp-kit/framework-v1",
+  "moduleAbi": "quickapp-kit-app-module-v1",
+  "runtimeAbi": "quickapp-kit-runtime-v1",
+  "path": "framework/quickapp-framework-v1.js",
+  "mime": "application/javascript",
+  "byteLength": 7371,
+  "sha256": "b53464aa786d024cd0938015caf11171ea7f3dcfa8e16f2f0f0a9d5a9e26e1af",
+  "inline": {
+    "path": "create-reactive-page-vm-v1.js",
+    "byteLength": 6766,
+    "sha256": "88152643e3e5d33284e782efcce7691b7fbc7b5f34f505985a4c37fcb18835c0"
+  }
+}

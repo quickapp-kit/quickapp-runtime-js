@@ -11,14 +11,17 @@ if(QUICKAPP_JS_BUILD_TESTS)
 
   add_custom_target(quickapp_js_framework_inventory ALL
     COMMAND "${QUICKAPP_JS_NODE_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/scripts/build-framework.mjs"
+    COMMAND "${QUICKAPP_JS_NODE_EXECUTABLE}" --test
+            "${CMAKE_CURRENT_SOURCE_DIR}/test/reactive-page-vm.test.mjs"
+    COMMAND "${QUICKAPP_JS_NODE_EXECUTABLE}"
             "${CMAKE_CURRENT_SOURCE_DIR}/test/source-boundary.test.mjs"
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
     VERBATIM)
 
   enable_testing()
   add_test(NAME js_framework_source_boundary
-    COMMAND "${QUICKAPP_JS_NODE_EXECUTABLE}"
-            "${CMAKE_CURRENT_SOURCE_DIR}/test/source-boundary.test.mjs")
+    COMMAND npm test)
   set_tests_properties(js_framework_source_boundary PROPERTIES
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
 endif()

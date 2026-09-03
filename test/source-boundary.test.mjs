@@ -23,8 +23,8 @@ const compiledSources = files.filter((file) => forbiddenExtensions.has(path.extn
 assert.deepEqual(compiledSources, [], 'quickapp-runtime-js must not contain C/C++ source files')
 
 const source = JSON.parse(await readFile(path.join(root, 'framework/source.json'), 'utf8'))
-assert.equal(source.status, 'toolkit-inline')
-assert.equal(source.independentBundle, false)
+assert.equal(source.status, 'independent-bundle-available')
+assert.equal(source.independentBundle, true)
 assert.ok(source.ownedSemantics.includes('reactive-state'))
 assert.ok(source.ownedSemantics.includes('render-intent'))
 
@@ -40,4 +40,4 @@ for (const marker of [
 }
 
 console.log('js_framework_source_boundary=passed')
-console.log('independent_bundle=false')
+console.log(`independent_bundle=${source.independentBundle}`)
