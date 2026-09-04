@@ -93,6 +93,32 @@ test('if and keyed for blocks preserve identity and emit structural operations',
   }
 })
 
+test('initial block snapshot reflects state changed by onInit', async () => {
+  const transactions = []
+  const createReactivePageVm = await loadFactory(transactions)
+  const page = createReactivePageVm(
+    { visible: false },
+    { surfaceId: 'srf:initial' },
+    {},
+    {
+      1: {
+        templateBlockId: 1,
+        kind: 'if',
+        parentTemplateNodeId: 1,
+        staticIndex: 0,
+        deps: ['visible'],
+        bindings: {},
+        handlers: [],
+        evaluate() { return this.visible },
+      },
+    },
+  )
+  page.visible = true
+  assert.equal(page.__qak_initial_blocks__.length, 1)
+  await Promise.resolve()
+  assert.equal(transactions.length, 0)
+})
+
 test('built shared bundle registers the frozen default export shape', async () => {
   const bundle = await readFile(path.join(root, 'dist/quickapp-framework-v1.js'), 'utf8')
   const registry = new Map()

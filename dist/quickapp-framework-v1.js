@@ -134,6 +134,16 @@ $app_define$("@quickapp-kit/framework-v1", [], function ($app_require$, module, 
       activeBlocks = nextBlocks
       activeBlockSlots = nextSlots
     }
+    const prepareInitialBlocks = function () {
+      scheduled = false
+      dirty.clear()
+      activeBlocks = new Map()
+      activeBlockSlots = new Map()
+      blockGenerations.clear()
+      const initialBlocks = reconcileBlocks(true)
+      commitBlocks(initialBlocks.nextBlocks, initialBlocks.nextSlots)
+      return initialBlocks.operations
+    }
     const flush = function () {
       scheduled = false
       if (dirty.size === 0) return
@@ -192,10 +202,8 @@ $app_define$("@quickapp-kit/framework-v1", [], function ($app_require$, module, 
         return true
       },
     })
-    const initialBlocks = reconcileBlocks(true)
-    commitBlocks(initialBlocks.nextBlocks, initialBlocks.nextSlots)
     Object.defineProperty(proxy, "__qak_initial_blocks__", {
-      value: initialBlocks.operations,
+      get: prepareInitialBlocks,
     })
     return proxy
   });
