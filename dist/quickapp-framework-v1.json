@@ -5,11 +5,11 @@
   "runtimeAbi": "quickapp-kit-runtime-v1",
   "path": "framework/quickapp-framework-v1.js",
   "mime": "application/javascript",
-  "byteLength": 7601,
-  "sha256": "8e849990c50f755f368cf79dd88fbead75c9ace3e4ab18505e9d42ba01640b9a",
+  "byteLength": 12401,
+  "sha256": "1b5650a1c823ca05781f6755f8701a59f1e6254f28c767245613bbd80a68bf64",
   "inline": {
     "path": "create-reactive-page-vm-v1.js",
-    "byteLength": 6980,
-    "sha256": "149aa78342e12ecde9d435eb5502586a58faee937d8c4f4acaabdea9d44a6276"
+    "byteLength": 11688,
+    "sha256": "a9f0316482dda50d10f24e24e0ff098a877ef8e1b7087e7fef61317f32907926"
   }
 }
